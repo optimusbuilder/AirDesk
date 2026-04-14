@@ -110,8 +110,15 @@ class Renderer:
         )
 
     def _draw_window_fill(self, frame: Any, window: VirtualWindow) -> None:
-        fill_alpha = 0.42 if window.state is WindowState.IDLE else 0.54
-        header_alpha = 0.30 if window.state is WindowState.IDLE else 0.38
+        if window.state is WindowState.GRABBED:
+            fill_alpha = 0.60
+            header_alpha = 0.44
+        elif window.state is WindowState.HOVERED:
+            fill_alpha = 0.54
+            header_alpha = 0.38
+        else:
+            fill_alpha = 0.42
+            header_alpha = 0.30
         header_height = 34
         self._draw_translucent_rect(
             frame,
@@ -134,7 +141,12 @@ class Renderer:
 
     def _draw_window_border(self, frame: Any, window: VirtualWindow) -> None:
         border_color = self._border_for_window(window)
-        thickness = self.config.window_border_thickness + (1 if window.state is WindowState.HOVERED else 0)
+        if window.state is WindowState.GRABBED:
+            thickness = self.config.window_border_thickness + 2
+        elif window.state is WindowState.HOVERED:
+            thickness = self.config.window_border_thickness + 1
+        else:
+            thickness = self.config.window_border_thickness
         self._cv2.rectangle(
             frame,
             (window.x, window.y),
@@ -193,6 +205,7 @@ class Renderer:
             f"Tracking: {'stable' if gesture_state.tracking_stable else 'lost'}",
             f"Pinch: {'active' if gesture_state.pinch_active else 'idle'}",
             f"Hovered window: {interaction_state.hovered_window_id or 'none'}",
+            f"Grabbed window: {interaction_state.grabbed_window_id or 'none'}",
         ]
 
         if hand_state.detected and hand_state.index_tip is not None:

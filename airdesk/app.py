@@ -32,11 +32,11 @@ class AirDeskApp:
         hand_tracker: HandTracker | None = None
         renderer = Renderer(config=self.config.render)
         gesture_engine = GestureEngine(config=self.config.gestures)
-        interaction_controller = InteractionController()
+        interaction_controller = InteractionController(config=self.config.gestures)
         interaction_state = InteractionState()
         window_manager = WindowManager()
 
-        print("Starting AirDesk Milestone 5 runtime. Press Q or Esc to quit.")
+        print("Starting AirDesk Milestone 6 runtime. Press Q or Esc to quit.")
 
         try:
             camera_stream.open()
@@ -58,6 +58,8 @@ class AirDeskApp:
                     gesture_state,
                     window_manager,
                     interaction_state,
+                    frame.width,
+                    frame.height,
                 )
                 display_frame = renderer.render(
                     frame.image,
@@ -68,7 +70,7 @@ class AirDeskApp:
                 )
                 cv2.putText(
                     display_frame,
-                    "AirDesk Milestone 5  |  Press Q or Esc to quit",
+                    "AirDesk Milestone 6  |  Press Q or Esc to quit",
                     (16, frame.height - 20),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.6,
@@ -117,7 +119,8 @@ class AirDeskApp:
                 height=window_height,
                 body_lines=(
                     "Hover with the fingertip cursor.",
-                    "Pinch-to-grab arrives in Milestone 6.",
+                    "Pinch and drag to move this panel.",
+                    "Release the pinch to drop it in place.",
                     "This panel is fully in-app for now.",
                 ),
             )

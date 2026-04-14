@@ -18,3 +18,4 @@ class InteractionState:
         self.grabbed_window_id = None
         self.grab_offset_x = 0.0
         self.grab_offset_y = 0.0
+        self.hand_missing_since = None

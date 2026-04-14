@@ -12,7 +12,7 @@ This repository now has the initial project scaffold plus the first two runtime 
 4. A smoothed fingertip cursor now follows the index finger, with raw versus smoothed positions shown in the debug HUD
 5. Pinch detection now exposes stable start, hold, and end signals using hand-size normalized thresholds with hysteresis
 6. A styled in-app virtual window now renders with idle and hover states driven by cursor hit-testing
-7. Grab-and-move interaction polish is still upcoming
+7. Pinch-to-grab now moves the virtual window with preserved grab offset and releases it cleanly in place
 
 The rest of this README remains the implementation plan for the next milestones.
 
