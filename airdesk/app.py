@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 
 from airdesk.config import AppConfig, build_default_config
-from airdesk.models.gesture import GestureState
+from airdesk.gestures.gesture_engine import GestureEngine
 from airdesk.models.interaction import InteractionState
 from airdesk.ui.renderer import Renderer
 from airdesk.vision.camera import CameraStream
@@ -28,11 +28,11 @@ class AirDeskApp:
         camera_stream = CameraStream(self.config.camera)
         hand_tracker: HandTracker | None = None
         renderer = Renderer(config=self.config.render)
-        gesture_state = GestureState()
+        gesture_engine = GestureEngine(config=self.config.gestures)
         interaction_state = InteractionState()
         windows = []
 
-        print("Starting AirDesk Milestone 2 runtime. Press Q or Esc to quit.")
+        print("Starting AirDesk Milestone 4 runtime. Press Q or Esc to quit.")
 
         try:
             camera_stream.open()
@@ -48,6 +48,7 @@ class AirDeskApp:
             while True:
                 frame = camera_stream.read()
                 hand_state = hand_tracker.detect(frame.image)
+                gesture_state = gesture_engine.update(hand_state)
                 display_frame = renderer.render(
                     frame.image,
                     hand_state,
@@ -57,7 +58,7 @@ class AirDeskApp:
                 )
                 cv2.putText(
                     display_frame,
-                    "AirDesk Milestone 2  |  Press Q or Esc to quit",
+                    "AirDesk Milestone 4  |  Press Q or Esc to quit",
                     (16, frame.height - 20),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.6,

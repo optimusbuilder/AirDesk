@@ -1,5 +1,6 @@
 """Rendering abstractions for webcam frames and overlays."""
 
+import math
 from typing import Any
 
 from airdesk.config import RenderConfig
@@ -29,9 +30,10 @@ class Renderer:
         """Compose the current frame."""
         composited = frame.copy()
         self._draw_hand_landmarks(composited, hand_state)
+        self._draw_cursor(composited, gesture_state)
 
         if self.config.show_debug_hud:
-            self._draw_debug_hud(composited, hand_state)
+            self._draw_debug_hud(composited, hand_state, gesture_state)
 
         return composited
 
@@ -60,15 +62,66 @@ class Renderer:
             radius = 6 if landmark_id in accent_landmarks else 4
             self._cv2.circle(frame, point, radius, color, -1, self._cv2.LINE_AA)
 
-    def _draw_debug_hud(self, frame: Any, hand_state: HandState) -> None:
+    def _draw_cursor(self, frame: Any, gesture_state: GestureState) -> None:
+        cursor = gesture_state.cursor_px
+        if cursor is None or not gesture_state.tracking_stable:
+            return
+
+        outer_radius = self.config.cursor_radius
+        inner_radius = max(self.config.cursor_radius // 3, 2)
+        cursor_color = self.theme.landmark_accent if gesture_state.pinch_active else self.theme.cursor
+        thickness = 3 if gesture_state.pinch_active else 2
+        self._cv2.circle(
+            frame,
+            cursor,
+            outer_radius,
+            cursor_color,
+            thickness,
+            self._cv2.LINE_AA,
+        )
+        self._cv2.circle(
+            frame,
+            cursor,
+            inner_radius,
+            cursor_color,
+            -1,
+            self._cv2.LINE_AA,
+        )
+
+    def _draw_debug_hud(
+        self,
+        frame: Any,
+        hand_state: HandState,
+        gesture_state: GestureState,
+    ) -> None:
         lines = [
             f"Hand: {'detected' if hand_state.detected else 'not detected'}",
             f"Confidence: {hand_state.confidence:.2f}",
+            f"Tracking: {'stable' if gesture_state.tracking_stable else 'lost'}",
+            f"Pinch: {'active' if gesture_state.pinch_active else 'idle'}",
         ]
 
         if hand_state.detected and hand_state.index_tip is not None:
             lines.append(f"Index tip: {hand_state.index_tip[0]}, {hand_state.index_tip[1]}")
             lines.append(f"Hand scale: {hand_state.hand_scale:.1f}px")
+
+        if gesture_state.raw_cursor_px is not None:
+            lines.append(
+                f"Raw cursor: {gesture_state.raw_cursor_px[0]}, {gesture_state.raw_cursor_px[1]}"
+            )
+
+        if gesture_state.cursor_px is not None:
+            lines.append(f"Cursor: {gesture_state.cursor_px[0]}, {gesture_state.cursor_px[1]}")
+
+        if math.isfinite(gesture_state.pinch_ratio):
+            lines.append(f"Pinch ratio: {gesture_state.pinch_ratio:.3f}")
+        elif hand_state.detected:
+            lines.append("Pinch ratio: n/a")
+
+        if gesture_state.pinch_started:
+            lines.append("Pinch event: started")
+        elif gesture_state.pinch_ended:
+            lines.append("Pinch event: ended")
 
         for line_number, text in enumerate(lines):
             y = 28 + (line_number * 24)

@@ -9,7 +9,9 @@ This repository now has the initial project scaffold plus the first two runtime 
 1. Package structure, configuration models, and state models are in place
 2. The application can open a webcam stream, mirror frames, display them in an OpenCV window, and shut down cleanly
 3. MediaPipe hand tracking is wired in, with one-hand landmark overlays and a minimal debug HUD
-4. Cursor logic, pinch detection, virtual windows, and interaction polish are still upcoming milestones
+4. A smoothed fingertip cursor now follows the index finger, with raw versus smoothed positions shown in the debug HUD
+5. Pinch detection now exposes stable start, hold, and end signals using hand-size normalized thresholds with hysteresis
+6. Virtual windows and interaction polish are still upcoming milestones
 
 The rest of this README remains the implementation plan for the next milestones.
 
