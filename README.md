@@ -11,7 +11,8 @@ This repository now has the initial project scaffold plus the first two runtime 
 3. MediaPipe hand tracking is wired in, with one-hand landmark overlays and a minimal debug HUD
 4. A smoothed fingertip cursor now follows the index finger, with raw versus smoothed positions shown in the debug HUD
 5. Pinch detection now exposes stable start, hold, and end signals using hand-size normalized thresholds with hysteresis
-6. Virtual windows and interaction polish are still upcoming milestones
+6. A styled in-app virtual window now renders with idle and hover states driven by cursor hit-testing
+7. Grab-and-move interaction polish is still upcoming
 
 The rest of this README remains the implementation plan for the next milestones.
 

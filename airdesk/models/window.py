@@ -24,6 +24,7 @@ class VirtualWindow:
     y: int
     width: int
     height: int
+    body_lines: tuple[str, ...] = ()
     z_index: int = 0
     state: WindowState = WindowState.IDLE
 

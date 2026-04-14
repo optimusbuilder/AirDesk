@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 
 from airdesk.models.hand import PixelPoint
-from airdesk.models.window import VirtualWindow
+from airdesk.models.window import VirtualWindow, WindowState
 
 
 @dataclass(slots=True)
@@ -43,3 +43,17 @@ class WindowManager:
         next_z_index = max((item.z_index for item in self.windows), default=-1) + 1
         window.z_index = next_z_index
         return window
+
+    def update_window_states(
+        self,
+        hovered_window_id: str | None,
+        grabbed_window_id: str | None,
+    ) -> None:
+        """Apply visual state flags to all managed windows."""
+        for window in self.windows:
+            if grabbed_window_id is not None and window.id == grabbed_window_id:
+                window.state = WindowState.GRABBED
+            elif hovered_window_id is not None and window.id == hovered_window_id:
+                window.state = WindowState.HOVERED
+            else:
+                window.state = WindowState.IDLE

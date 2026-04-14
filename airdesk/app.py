@@ -3,8 +3,11 @@
 from dataclasses import dataclass, field
 
 from airdesk.config import AppConfig, build_default_config
+from airdesk.core.interaction_controller import InteractionController
+from airdesk.core.window_manager import WindowManager
 from airdesk.gestures.gesture_engine import GestureEngine
 from airdesk.models.interaction import InteractionState
+from airdesk.models.window import VirtualWindow
 from airdesk.ui.renderer import Renderer
 from airdesk.vision.camera import CameraStream
 from airdesk.vision.hand_tracker import HandTracker
@@ -29,10 +32,11 @@ class AirDeskApp:
         hand_tracker: HandTracker | None = None
         renderer = Renderer(config=self.config.render)
         gesture_engine = GestureEngine(config=self.config.gestures)
+        interaction_controller = InteractionController()
         interaction_state = InteractionState()
-        windows = []
+        window_manager = WindowManager()
 
-        print("Starting AirDesk Milestone 4 runtime. Press Q or Esc to quit.")
+        print("Starting AirDesk Milestone 5 runtime. Press Q or Esc to quit.")
 
         try:
             camera_stream.open()
@@ -47,18 +51,24 @@ class AirDeskApp:
             hand_tracker = HandTracker(self.config.tracking)
             while True:
                 frame = camera_stream.read()
+                self._seed_windows(window_manager, frame.width, frame.height)
                 hand_state = hand_tracker.detect(frame.image)
                 gesture_state = gesture_engine.update(hand_state)
+                interaction_state = interaction_controller.update(
+                    gesture_state,
+                    window_manager,
+                    interaction_state,
+                )
                 display_frame = renderer.render(
                     frame.image,
                     hand_state,
                     gesture_state,
-                    windows,
+                    window_manager.ordered_windows(),
                     interaction_state,
                 )
                 cv2.putText(
                     display_frame,
-                    "AirDesk Milestone 4  |  Press Q or Esc to quit",
+                    "AirDesk Milestone 5  |  Press Q or Esc to quit",
                     (16, frame.height - 20),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.6,
@@ -87,3 +97,28 @@ class AirDeskApp:
             print("AirDesk shutdown complete.")
 
         return return_code
+
+    def _seed_windows(self, window_manager: WindowManager, frame_width: int, frame_height: int) -> None:
+        """Create the initial MVP panel once frame dimensions are known."""
+        if window_manager.windows:
+            return
+
+        window_width = min(280, max(frame_width - 220, 220))
+        window_height = min(170, max(frame_height - 260, 140))
+        window_x = max((frame_width - window_width) // 2, 32)
+        window_y = max(56, frame_height // 7)
+        window_manager.add_window(
+            VirtualWindow(
+                id="air-panel-1",
+                title="Air Panel",
+                x=window_x,
+                y=window_y,
+                width=window_width,
+                height=window_height,
+                body_lines=(
+                    "Hover with the fingertip cursor.",
+                    "Pinch-to-grab arrives in Milestone 6.",
+                    "This panel is fully in-app for now.",
+                ),
+            )
+        )
