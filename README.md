@@ -4,7 +4,14 @@ Gesture-controlled virtual monitor system for spatial interaction using a standa
 
 ## Status
 
-This repository is currently in the design phase. The goal of this document is to define the MVP architecture, interaction model, system boundaries, and implementation plan before coding begins.
+This repository now has the initial project scaffold plus the first two runtime milestones:
+
+1. Package structure, configuration models, and state models are in place
+2. The application can open a webcam stream, mirror frames, display them in an OpenCV window, and shut down cleanly
+3. MediaPipe hand tracking is wired in, with one-hand landmark overlays and a minimal debug HUD
+4. Cursor logic, pinch detection, virtual windows, and interaction polish are still upcoming milestones
+
+The rest of this README remains the implementation plan for the next milestones.
 
 ## Vision
 
@@ -63,12 +70,14 @@ The intended feeling is not "debugging a hand tracker." It should feel like touc
 Once implementation begins, the intended local setup flow is:
 
 ```bash
-python3 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -e .[dev]
 ```
 
 This repository now includes a `pyproject.toml` scaffold so dependencies and developer tooling can be installed from a single entry point.
+Use Python 3.11 or 3.12 for now; the current `mediapipe` release used by AirDesk does not advertise Python 3.13 or 3.14 support on PyPI.
+Because AirDesk is a webcam desktop app, run it from a local GUI session and allow camera access when macOS prompts for it.
 
 ## System Overview
 

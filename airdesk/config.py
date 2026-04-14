@@ -1,6 +1,11 @@
 """Configuration models for AirDesk."""
 
 from dataclasses import dataclass
+from pathlib import Path
+
+
+PACKAGE_ROOT = Path(__file__).resolve().parent
+DEFAULT_HAND_LANDMARKER_PATH = PACKAGE_ROOT / "assets" / "hand_landmarker.task"
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,8 +22,10 @@ class CameraConfig:
 class TrackingConfig:
     """MediaPipe hand tracking settings."""
 
+    model_asset_path: str = str(DEFAULT_HAND_LANDMARKER_PATH)
     max_num_hands: int = 1
     min_detection_confidence: float = 0.60
+    min_hand_presence_confidence: float = 0.60
     min_tracking_confidence: float = 0.60
 
 
