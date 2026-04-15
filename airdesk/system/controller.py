@@ -14,6 +14,10 @@ class SystemIntentController:
     enabled: bool = False
     previous_button_down: bool = False
 
+    def reset(self) -> None:
+        """Clear any remembered button state."""
+        self.previous_button_down = False
+
     def update(
         self,
         gesture_state: GestureState,

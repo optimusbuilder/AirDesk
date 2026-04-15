@@ -13,3 +13,6 @@ class SystemBackend(ABC):
     @abstractmethod
     def apply(self, state: SystemControlState) -> SystemControlState:
         """Apply one frame of system intent and return the reported state."""
+
+    def reset(self) -> None:
+        """Release any backend-held state before shutdown or disarm."""

@@ -291,6 +291,11 @@ class Renderer:
             helper = "Point to move, pinch to press"
             status = system_state.effect_label
             status_color = self._color_for_system_phase(system_state)
+        elif app_mode is AppMode.SYSTEM_MACOS:
+            title = "macOS Control"
+            helper = "Point to move, pinch to click"
+            status = system_state.effect_label
+            status_color = self._color_for_system_phase(system_state)
         else:
             title = "Prototype"
             helper = "Point to hover, pinch to drag"

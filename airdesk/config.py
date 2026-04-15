@@ -14,6 +14,7 @@ class AppMode(StrEnum):
 
     PROTOTYPE = "prototype"
     SYSTEM_SHADOW = "system-shadow"
+    SYSTEM_MACOS = "system-macos"
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +63,8 @@ class SystemControlConfig:
     """System-control mode configuration."""
 
     mode: AppMode = AppMode.PROTOTYPE
+    enable_live_backend: bool = False
+    start_armed: bool = False
 
 
 @dataclass(frozen=True, slots=True)

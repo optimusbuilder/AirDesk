@@ -15,6 +15,7 @@ This repository now has the initial project scaffold plus the first two runtime 
 7. Pinch-to-grab now moves the virtual window with preserved grab offset and releases it cleanly in place
 8. The in-app prototype now supports multiple overlapping panels with frontmost selection and z-order updates while dragging
 9. A first system-control architecture now exists behind `--mode system-shadow`, translating gestures into backend-agnostic pointer intents without touching the real OS yet
+10. Experimental live macOS cursor control now exists behind `--mode system-macos --enable-system-actions`, with a runtime `S` arm/disarm safety toggle
 
 At this point the in-app interaction prototype is functionally complete. The remaining work is polish, tuning, and any future system-integration layer.
 
@@ -43,8 +44,8 @@ The MVP should support the following end-to-end flow:
 
 The following are explicitly out of scope for the first version:
 
-1. Controlling real operating system windows
-2. Injecting mouse or keyboard input into the OS
+1. Moving or resizing real operating system windows
+2. Broad keyboard automation or shortcut injection
 3. Two-hand resizing or rotation
 4. Depth-aware interaction or 3D positioning
 5. Gesture-created or gesture-deleted windows
@@ -94,7 +95,10 @@ python -m airdesk.main
 python -m airdesk.main --hide-debug-hud
 python -m airdesk.main --camera-index 1
 python -m airdesk.main --mode system-shadow
+python -m airdesk.main --mode system-macos --enable-system-actions
 ```
+
+For live macOS control, AirDesk starts safely disarmed unless you also pass `--start-armed`. While the app is running, press `S` to arm or disarm live system actions. macOS Accessibility permission is required for the Python process or terminal that launches the app.
 
 ## System Overview
 
