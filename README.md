@@ -17,8 +17,11 @@ This repository now has the initial project scaffold plus the first two runtime 
 9. A first system-control architecture now exists behind `--mode system-shadow`, translating gestures into backend-agnostic pointer intents without touching the real OS yet
 10. Experimental live macOS cursor control now exists behind `--mode system-macos --enable-system-actions`, with a runtime `S` arm/disarm safety toggle
 11. System-control modes now use an open-palm clutch plus a short pinch debounce, with calmer pointer shaping for safer live control
+12. Live macOS control now includes a focused-window move mode behind `W`, letting you pinch-drag the current external window through Accessibility APIs
+13. Window mode can now lock a target behind `C`, so the chosen app window stays controllable even after AirDesk regains focus
+14. Window mode now supports `R` to switch between move and resize, plus left, right, and top-edge snapping for real macOS windows
 
-At this point the in-app interaction prototype is functionally complete. The remaining work is polish, tuning, and any future system-integration layer.
+At this point the in-app interaction prototype is functionally complete, and the macOS system-control layer covers real pointer control plus early window movement, resizing, and snapping. The remaining work is polish, tuning, and broader desktop integration.
 
 The rest of this README remains the implementation plan for the next milestones.
 
@@ -45,13 +48,12 @@ The MVP should support the following end-to-end flow:
 
 The following are explicitly out of scope for the first version:
 
-1. Moving or resizing real operating system windows
-2. Broad keyboard automation or shortcut injection
-3. Two-hand resizing or rotation
-4. Depth-aware interaction or 3D positioning
-5. Gesture-created or gesture-deleted windows
-6. Snapping, tiling, or layout memory
-7. Full pose classification for every finger shape
+1. Broad keyboard automation or shortcut injection
+2. Two-hand resizing or rotation
+3. Depth-aware interaction or 3D positioning
+4. Gesture-created or gesture-deleted windows
+5. Layout memory beyond the current live session
+6. Full pose classification for every finger shape
 
 ## Design Principles
 
@@ -99,7 +101,7 @@ python -m airdesk.main --mode system-shadow
 python -m airdesk.main --mode system-macos --enable-system-actions
 ```
 
-For live macOS control, AirDesk starts safely disarmed unless you also pass `--start-armed`. While the app is running, press `S` to arm or disarm live system actions. macOS Accessibility permission is required for the Python process or terminal that launches the app.
+For live macOS control, AirDesk starts safely disarmed unless you also pass `--start-armed`. While the app is running, press `S` to arm or disarm live system actions, press `W` to switch between pointer mode and focused-window mode, press `R` in window mode to switch between move and resize, and press `C` in window mode to lock or clear the current target window. The first successful window action also locks that target automatically, and dragging a window to the left, right, or top edge will snap it on release. macOS Accessibility permission is required for the Python process or terminal that launches the app.
 
 ## System Overview
 

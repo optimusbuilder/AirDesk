@@ -12,7 +12,12 @@ from airdesk.platform.base import SystemBackend
 from airdesk.platform.macos import MacOSSystemBackend
 from airdesk.platform.shadow import ShadowSystemBackend
 from airdesk.system.controller import SystemIntentController
-from airdesk.system.intents import PointerPhase, SystemControlState
+from airdesk.system.intents import (
+    ControlMode,
+    PointerPhase,
+    SystemControlState,
+    WindowActionMode,
+)
 from airdesk.ui.renderer import Renderer
 from airdesk.vision.camera import CameraStream
 from airdesk.vision.hand_tracker import HandTracker
@@ -39,6 +44,8 @@ class AirDeskApp:
         gesture_engine = GestureEngine(config=self.config.gestures)
         interaction_controller = InteractionController(config=self.config.gestures)
         system_controller = SystemIntentController(config=self.config.system)
+        system_control_mode = ControlMode.POINTER
+        system_window_action_mode = WindowActionMode.MOVE
         system_armed = self.config.system.mode is AppMode.SYSTEM_SHADOW or (
             self.config.system.mode is AppMode.SYSTEM_MACOS
             and self.config.system.enable_live_backend
@@ -49,6 +56,8 @@ class AirDeskApp:
         except RuntimeError as exc:
             print(f"AirDesk could not start: {exc}")
             return 1
+        if system_backend is not None:
+            system_backend.set_control_mode(system_control_mode)
         system_state = SystemControlState()
         interaction_state = InteractionState()
         window_manager = WindowManager()
@@ -89,6 +98,8 @@ class AirDeskApp:
                     system_controller,
                     system_backend,
                     system_armed,
+                    system_control_mode,
+                    system_window_action_mode,
                 )
 
                 display_frame = renderer.render(
@@ -129,6 +140,22 @@ class AirDeskApp:
                         system_controller,
                         system_backend,
                     )
+                if key in (ord("w"), ord("W")) and self.config.system.mode is not AppMode.PROTOTYPE:
+                    system_control_mode = self._toggle_system_control_mode(
+                        system_control_mode,
+                        system_backend,
+                    )
+                if key in (ord("r"), ord("R")) and self.config.system.mode is not AppMode.PROTOTYPE:
+                    system_window_action_mode = self._toggle_system_window_action_mode(
+                        system_control_mode,
+                        system_window_action_mode,
+                        system_backend,
+                    )
+                if key in (ord("c"), ord("C")) and self.config.system.mode is not AppMode.PROTOTYPE:
+                    self._toggle_system_target_lock(
+                        system_control_mode,
+                        system_backend,
+                    )
         except KeyboardInterrupt:
             print("\nAirDesk interrupted by user.")
         except (RuntimeError, cv2.error) as exc:
@@ -159,7 +186,10 @@ class AirDeskApp:
     def _startup_message(self, system_armed: bool) -> str:
         """Return the startup banner for the selected runtime mode."""
         if self.config.system.mode is AppMode.SYSTEM_SHADOW:
-            return "Starting AirDesk system shadow mode. Press Q or Esc to quit."
+            return (
+                "Starting AirDesk system shadow mode. Press W for window mode, "
+                "R to switch move and resize, C to lock a target, and Q or Esc to quit."
+            )
         if self.config.system.mode is AppMode.SYSTEM_MACOS:
             if not self.config.system.enable_live_backend:
                 return (
@@ -167,8 +197,16 @@ class AirDeskApp:
                     "Relaunch with --enable-system-actions to arm live control."
                 )
             if system_armed:
-                return "Starting AirDesk macOS control mode armed. Press S to disarm. Press Q or Esc to quit."
-            return "Starting AirDesk macOS control mode disarmed. Press S to arm. Press Q or Esc to quit."
+                return (
+                    "Starting AirDesk macOS control mode armed. Press W for window mode, "
+                    "R to switch move and resize, C to lock a target, S to disarm, "
+                    "and Q or Esc to quit."
+                )
+            return (
+                "Starting AirDesk macOS control mode disarmed. Press S to arm, "
+                "W for window mode, R to switch move and resize, C to lock a target, "
+                "and Q or Esc to quit."
+            )
         return "Starting AirDesk in-app prototype. Press Q or Esc to quit."
 
     def _system_state_for_frame(
@@ -179,6 +217,8 @@ class AirDeskApp:
         system_controller: SystemIntentController,
         system_backend: SystemBackend | None,
         system_armed: bool,
+        system_control_mode: ControlMode,
+        system_window_action_mode: WindowActionMode,
     ) -> SystemControlState:
         """Resolve the current system-control state for the active runtime mode."""
         if self.config.system.mode is AppMode.PROTOTYPE:
@@ -190,6 +230,8 @@ class AirDeskApp:
             system_controller.enabled = True
             state = system_controller.update(gesture_state, frame_width, frame_height)
             state.armed = True
+            state.control_mode = system_control_mode
+            state.window_action_mode = system_window_action_mode
             if system_backend is not None:
                 state = system_backend.apply(state)
             return state
@@ -201,6 +243,8 @@ class AirDeskApp:
                 enabled=True,
                 armed=False,
                 backend_name="macos",
+                control_mode=system_control_mode,
+                window_action_mode=system_window_action_mode,
                 phase=PointerPhase.IDLE,
                 effect_label="Live control locked - relaunch with --enable-system-actions",
             )
@@ -211,6 +255,8 @@ class AirDeskApp:
                 enabled=True,
                 armed=False,
                 backend_name="macos",
+                control_mode=system_control_mode,
+                window_action_mode=system_window_action_mode,
                 phase=PointerPhase.IDLE,
                 effect_label="Live control disarmed - press S to arm",
             )
@@ -218,6 +264,8 @@ class AirDeskApp:
         system_controller.enabled = True
         state = system_controller.update(gesture_state, frame_width, frame_height)
         state.armed = True
+        state.control_mode = system_control_mode
+        state.window_action_mode = system_window_action_mode
         if system_backend is not None:
             state = system_backend.apply(state)
         return state
@@ -247,13 +295,66 @@ class AirDeskApp:
     def _footer_text(self, system_armed: bool) -> str:
         """Return footer text for the active runtime mode."""
         if self.config.system.mode is AppMode.SYSTEM_SHADOW:
-            return "AirDesk System Shadow | Q or Esc to quit"
+            return "AirDesk System Shadow | W mode | R move/resize | C lock | Q or Esc to quit"
         if self.config.system.mode is AppMode.SYSTEM_MACOS:
             if not self.config.system.enable_live_backend:
                 return "AirDesk macOS Control | Relaunch with --enable-system-actions"
             toggle_label = "Disarm" if system_armed else "Arm"
-            return f"AirDesk macOS Control | S to {toggle_label} | Open palm to steer | Q to quit"
+            return (
+                f"AirDesk macOS Control | S to {toggle_label} | W mode | R move/resize "
+                "| C lock target | Open palm to steer | Q to quit"
+            )
         return "AirDesk Prototype | Q or Esc to quit"
+
+    def _toggle_system_control_mode(
+        self,
+        system_control_mode: ControlMode,
+        system_backend: SystemBackend | None,
+    ) -> ControlMode:
+        """Switch between pointer control and focused-window control."""
+        next_mode = ControlMode.WINDOW if system_control_mode is ControlMode.POINTER else ControlMode.POINTER
+        if system_backend is not None:
+            system_backend.set_control_mode(next_mode)
+        print(f"System control switched to {next_mode.value} mode.")
+        return next_mode
+
+    def _toggle_system_window_action_mode(
+        self,
+        system_control_mode: ControlMode,
+        system_window_action_mode: WindowActionMode,
+        system_backend: SystemBackend | None,
+    ) -> WindowActionMode:
+        """Switch between moving and resizing the active window target."""
+        if system_control_mode is not ControlMode.WINDOW:
+            print("Switch to window mode before changing the window action.")
+            return system_window_action_mode
+        if system_backend is None:
+            print("No system backend is active for window actions.")
+            return system_window_action_mode
+        message = system_backend.toggle_window_action_mode()
+        if message is not None:
+            print(message)
+        return (
+            WindowActionMode.RESIZE
+            if system_window_action_mode is WindowActionMode.MOVE
+            else WindowActionMode.MOVE
+        )
+
+    def _toggle_system_target_lock(
+        self,
+        system_control_mode: ControlMode,
+        system_backend: SystemBackend | None,
+    ) -> None:
+        """Toggle a persistent target lock when supported by the backend."""
+        if system_control_mode is not ControlMode.WINDOW:
+            print("Switch to window mode before locking a target.")
+            return
+        if system_backend is None:
+            print("No system backend is active for target locking.")
+            return
+        message = system_backend.toggle_target_lock()
+        if message is not None:
+            print(message)
 
     def _seed_windows(self, window_manager: WindowManager, frame_width: int, frame_height: int) -> None:
         """Create the initial in-app prototype panels once frame dimensions are known."""

@@ -8,7 +8,7 @@ from airdesk.models.gesture import GestureState
 from airdesk.models.hand import HAND_CONNECTIONS, HandState
 from airdesk.models.interaction import InteractionState
 from airdesk.models.window import VirtualWindow, WindowState
-from airdesk.system.intents import SystemControlState
+from airdesk.system.intents import ControlMode, SystemControlState, WindowActionMode
 from airdesk.ui.theme import DEFAULT_THEME, Theme
 
 
@@ -288,12 +288,18 @@ class Renderer:
 
         if app_mode is AppMode.SYSTEM_SHADOW:
             title = "System Shadow"
-            helper = "Point to move, pinch to press"
+            helper = self._system_helper_text(
+                system_state.control_mode,
+                system_state.window_action_mode,
+            )
             status = system_state.effect_label
             status_color = self._color_for_system_phase(system_state)
         elif app_mode is AppMode.SYSTEM_MACOS:
             title = "macOS Control"
-            helper = "Point to move, pinch to click"
+            helper = self._system_helper_text(
+                system_state.control_mode,
+                system_state.window_action_mode,
+            )
             status = system_state.effect_label
             status_color = self._color_for_system_phase(system_state)
         else:
@@ -354,12 +360,17 @@ class Renderer:
         ]
 
         if system_state.enabled:
+            lines.append(f"Control: {system_state.control_mode.value}")
+            lines.append(f"Action: {system_state.window_action_mode.value}")
             lines.append(f"Armed: {'yes' if system_state.armed else 'no'}")
             lines.append(f"Clutch: {'engaged' if system_state.clutch_engaged else 'idle'}")
+            lines.append(f"Locked: {'yes' if system_state.target_locked else 'no'}")
             lines.append(f"System: {system_state.phase.value}")
             lines.append(f"Backend: {system_state.backend_name}")
             if system_state.permission_granted is not None:
                 lines.append(f"Trust: {'yes' if system_state.permission_granted else 'no'}")
+            if system_state.target_label is not None:
+                lines.append(f"Target: {system_state.target_label}")
 
         if gesture_state.cursor_px is not None:
             lines.append(f"Cursor: {gesture_state.cursor_px[0]}, {gesture_state.cursor_px[1]}")
@@ -447,6 +458,17 @@ class Renderer:
         if system_state.phase.value == "release":
             return self.theme.panel_hover_border
         return self.theme.text
+
+    @staticmethod
+    def _system_helper_text(
+        control_mode: ControlMode,
+        window_action_mode: WindowActionMode = WindowActionMode.MOVE,
+    ) -> str:
+        if control_mode is ControlMode.WINDOW:
+            if window_action_mode is WindowActionMode.RESIZE:
+                return "Pinch to resize | R: move | C: lock"
+            return "Pinch to move | R: resize | C: lock"
+        return "Open palm to steer, pinch to click"
 
     def _wrap_block(
         self,

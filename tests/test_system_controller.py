@@ -8,7 +8,7 @@ from airdesk.models.gesture import GestureState
 from airdesk.platform.macos import MacOSSystemBackend
 from airdesk.platform.shadow import ShadowSystemBackend
 from airdesk.system.controller import SystemIntentController
-from airdesk.system.intents import PointerPhase
+from airdesk.system.intents import ControlMode, PointerPhase, WindowActionMode
 
 
 def test_disabled_system_controller_returns_disabled_state() -> None:
@@ -245,9 +245,24 @@ class FakeMacOSBridge:
         *,
         trusted: bool = True,
         bounds: tuple[float, float, float, float] = (0.0, 0.0, 1440.0, 900.0),
+        focused_window_title: str | None = "Notes",
+        focused_window_bounds: tuple[float, float, float, float] | None = (120.0, 160.0, 900.0, 700.0),
+        focused_window_pid: int = 4242,
+        window_position_settable: bool = True,
+        window_size_settable: bool = True,
     ) -> None:
         self._trusted = trusted
         self._bounds = bounds
+        self._windows: dict[object, dict[str, object]] = {}
+        self._focused_window_ref: object | None = None
+        if focused_window_bounds is not None:
+            self._focused_window_ref = self.add_window(
+                title=focused_window_title,
+                bounds=focused_window_bounds,
+                pid=focused_window_pid,
+                position_settable=window_position_settable,
+                size_settable=window_size_settable,
+            )
         self.calls: list[tuple[str, tuple[float, float]]] = []
 
     def accessibility_is_trusted(self) -> bool:
@@ -267,6 +282,89 @@ class FakeMacOSBridge:
 
     def post_primary_up(self, point: tuple[float, float]) -> None:
         self.calls.append(("up", point))
+
+    def copy_focused_window(self) -> object | None:
+        return self._focused_window_ref
+
+    def release_ref(self, ref: object | None) -> None:
+        return None
+
+    def copy_window_title(self, window_ref: object) -> str | None:
+        data = self._windows.get(window_ref)
+        if data is None:
+            return None
+        return data["title"] if isinstance(data["title"], str) else None
+
+    def copy_window_bounds(self, window_ref: object) -> tuple[float, float, float, float] | None:
+        data = self._windows.get(window_ref)
+        if data is None:
+            return None
+        return data["bounds"] if isinstance(data["bounds"], tuple) else None
+
+    def is_window_position_settable(self, window_ref: object) -> bool:
+        data = self._windows.get(window_ref)
+        return bool(data["position_settable"]) if data is not None else False
+
+    def is_window_size_settable(self, window_ref: object) -> bool:
+        data = self._windows.get(window_ref)
+        return bool(data["size_settable"]) if data is not None else False
+
+    def window_pid(self, window_ref: object) -> int | None:
+        data = self._windows.get(window_ref)
+        return int(data["pid"]) if data is not None else None
+
+    def move_window_to(self, window_ref: object, origin: tuple[float, float]) -> None:
+        data = self._windows.get(window_ref)
+        if data is not None:
+            _, _, width, height = data["bounds"]
+            data["bounds"] = (origin[0], origin[1], width, height)
+        self.calls.append(("window-move", origin))
+
+    def resize_window_to(self, window_ref: object, size: tuple[float, float]) -> None:
+        data = self._windows.get(window_ref)
+        if data is not None:
+            origin_x, origin_y, _, _ = data["bounds"]
+            data["bounds"] = (origin_x, origin_y, size[0], size[1])
+        self.calls.append(("window-resize", size))
+
+    def add_window(
+        self,
+        *,
+        title: str | None,
+        bounds: tuple[float, float, float, float],
+        pid: int,
+        position_settable: bool,
+        size_settable: bool,
+    ) -> object:
+        window_ref = object()
+        self._windows[window_ref] = {
+            "title": title,
+            "bounds": bounds,
+            "pid": pid,
+            "position_settable": position_settable,
+            "size_settable": size_settable,
+        }
+        return window_ref
+
+    def set_focused_window(
+        self,
+        *,
+        title: str | None,
+        bounds: tuple[float, float, float, float] | None,
+        pid: int,
+        position_settable: bool = True,
+        size_settable: bool = True,
+    ) -> None:
+        if bounds is None:
+            self._focused_window_ref = None
+            return
+        self._focused_window_ref = self.add_window(
+            title=title,
+            bounds=bounds,
+            pid=pid,
+            position_settable=position_settable,
+            size_settable=size_settable,
+        )
 
 
 def test_macos_backend_maps_normalized_cursor_to_main_display() -> None:
@@ -377,3 +475,372 @@ def test_macos_backend_reset_releases_any_held_button() -> None:
     backend.reset()
 
     assert bridge.calls == [("move", (721, 451)), ("down", (721, 451)), ("up", (721, 451))]
+
+
+def test_macos_backend_window_mode_moves_the_focused_window() -> None:
+    """Window mode should move the focused external window instead of the pointer."""
+    bridge = FakeMacOSBridge()
+    backend = MacOSSystemBackend(bridge=bridge)
+    backend.set_control_mode(ControlMode.WINDOW)
+    times = iter([100.0, 100.25, 100.35, 100.45, 100.55, 100.65])
+    controller = SystemIntentController(
+        config=SystemControlConfig(clutch_activation_ms=180, pinch_press_delay_ms=60),
+        enabled=True,
+        time_fn=lambda: next(times),
+    )
+
+    controller.update(
+        GestureState(cursor_px=(320, 240), tracking_stable=True, clutch_pose=True),
+        640,
+        480,
+    )
+    ready = backend.apply(
+        controller.update(
+            GestureState(cursor_px=(320, 240), tracking_stable=True, clutch_pose=True),
+            640,
+            480,
+        )
+    )
+    grabbed = backend.apply(
+        controller.update(
+            GestureState(
+                cursor_px=(320, 240),
+                tracking_stable=True,
+                clutch_pose=True,
+                pinch_started=True,
+                pinch_active=True,
+            ),
+            640,
+            480,
+        )
+    )
+    grabbed = backend.apply(
+        controller.update(
+            GestureState(
+                cursor_px=(320, 240),
+                tracking_stable=True,
+                clutch_pose=True,
+                pinch_active=True,
+            ),
+            640,
+            480,
+        )
+    )
+    moved = backend.apply(
+        controller.update(
+            GestureState(
+                cursor_px=(380, 300),
+                tracking_stable=True,
+                clutch_pose=True,
+                pinch_active=True,
+            ),
+            640,
+            480,
+        )
+    )
+    released = backend.apply(
+        controller.update(
+            GestureState(
+                cursor_px=(380, 300),
+                tracking_stable=True,
+                clutch_pose=True,
+                pinch_ended=True,
+            ),
+            640,
+            480,
+        )
+    )
+
+    assert ready.control_mode is ControlMode.WINDOW
+    assert ready.target_label == "Notes"
+    assert grabbed.target_locked is True
+    assert grabbed.effect_label == 'Grabbed "Notes" for movement'
+    assert moved.effect_label == 'Moving "Notes" to 310, 318'
+    assert released.effect_label == 'Released "Notes"'
+    assert bridge.calls == [("window-move", (310, 318))]
+
+
+def test_macos_backend_window_mode_resizes_the_locked_window() -> None:
+    """Window mode should resize the locked target when resize action is active."""
+    bridge = FakeMacOSBridge()
+    backend = MacOSSystemBackend(bridge=bridge)
+    backend.set_control_mode(ControlMode.WINDOW)
+
+    action_message = backend.toggle_window_action_mode()
+
+    assert action_message == "Window action switched to resize."
+    assert backend.window_action_mode is WindowActionMode.RESIZE
+
+    times = iter([100.0, 100.25, 100.35, 100.45, 100.55, 100.65])
+    controller = SystemIntentController(
+        config=SystemControlConfig(clutch_activation_ms=180, pinch_press_delay_ms=60),
+        enabled=True,
+        time_fn=lambda: next(times),
+    )
+
+    controller.update(
+        GestureState(cursor_px=(320, 240), tracking_stable=True, clutch_pose=True),
+        640,
+        480,
+    )
+    ready = backend.apply(
+        controller.update(
+            GestureState(cursor_px=(320, 240), tracking_stable=True, clutch_pose=True),
+            640,
+            480,
+        )
+    )
+    backend.apply(
+        controller.update(
+            GestureState(
+                cursor_px=(320, 240),
+                tracking_stable=True,
+                clutch_pose=True,
+                pinch_started=True,
+                pinch_active=True,
+            ),
+            640,
+            480,
+        )
+    )
+    grabbed = backend.apply(
+        controller.update(
+            GestureState(
+                cursor_px=(320, 240),
+                tracking_stable=True,
+                clutch_pose=True,
+                pinch_active=True,
+            ),
+            640,
+            480,
+        )
+    )
+    resized = backend.apply(
+        controller.update(
+            GestureState(
+                cursor_px=(380, 300),
+                tracking_stable=True,
+                clutch_pose=True,
+                pinch_active=True,
+            ),
+            640,
+            480,
+        )
+    )
+    released = backend.apply(
+        controller.update(
+            GestureState(
+                cursor_px=(380, 300),
+                tracking_stable=True,
+                clutch_pose=True,
+                pinch_ended=True,
+            ),
+            640,
+            480,
+        )
+    )
+
+    assert ready.window_action_mode is WindowActionMode.RESIZE
+    assert 'ready to resize "notes"' in ready.effect_label.lower()
+    assert grabbed.effect_label == 'Grabbed top-right corner of "Notes" for resize'
+    assert resized.effect_label == 'Resizing "Notes" to 1090 x 542'
+    assert released.effect_label == 'Released resize on "Notes"'
+    assert bridge.calls == [
+        ("window-move", (120, 318)),
+        ("window-resize", (1090, 542)),
+    ]
+    assert bridge.copy_window_bounds(backend._locked_window_ref) == (120, 318, 1090, 542)
+
+
+def test_macos_backend_window_mode_snaps_left_on_release_near_edge() -> None:
+    """Window move mode should snap the target when released near a screen edge."""
+    bridge = FakeMacOSBridge()
+    backend = MacOSSystemBackend(bridge=bridge)
+    backend.set_control_mode(ControlMode.WINDOW)
+    times = iter([100.0, 100.25, 100.35, 100.45, 100.55, 100.65])
+    controller = SystemIntentController(
+        config=SystemControlConfig(clutch_activation_ms=180, pinch_press_delay_ms=60),
+        enabled=True,
+        time_fn=lambda: next(times),
+    )
+
+    controller.update(
+        GestureState(cursor_px=(320, 240), tracking_stable=True, clutch_pose=True),
+        640,
+        480,
+    )
+    backend.apply(
+        controller.update(
+            GestureState(cursor_px=(320, 240), tracking_stable=True, clutch_pose=True),
+            640,
+            480,
+        )
+    )
+    backend.apply(
+        controller.update(
+            GestureState(
+                cursor_px=(320, 240),
+                tracking_stable=True,
+                clutch_pose=True,
+                pinch_started=True,
+                pinch_active=True,
+            ),
+            640,
+            480,
+        )
+    )
+    backend.apply(
+        controller.update(
+            GestureState(
+                cursor_px=(320, 240),
+                tracking_stable=True,
+                clutch_pose=True,
+                pinch_active=True,
+            ),
+            640,
+            480,
+        )
+    )
+    preview = backend.apply(
+        controller.update(
+            GestureState(
+                cursor_px=(0, 200),
+                tracking_stable=True,
+                clutch_pose=True,
+                pinch_active=True,
+            ),
+            640,
+            480,
+        )
+    )
+    released = backend.apply(
+        controller.update(
+            GestureState(
+                cursor_px=(0, 200),
+                tracking_stable=True,
+                clutch_pose=True,
+                pinch_ended=True,
+            ),
+            640,
+            480,
+        )
+    )
+
+    assert preview.effect_label == 'Release to snap "Notes" left'
+    assert released.effect_label == 'Snapped "Notes" left'
+    assert bridge.calls[-2:] == [
+        ("window-move", (0, 0)),
+        ("window-resize", (720, 900)),
+    ]
+    assert bridge.copy_window_bounds(backend._locked_window_ref) == (0, 0, 720, 900)
+
+
+def test_macos_backend_locked_window_survives_focus_returning_to_airdesk() -> None:
+    """Once locked, the backend should keep moving the same window after focus changes."""
+    bridge = FakeMacOSBridge()
+    backend = MacOSSystemBackend(bridge=bridge)
+    backend.set_control_mode(ControlMode.WINDOW)
+    backend._process_pid = 0
+
+    lock_message = backend.toggle_target_lock()
+
+    assert lock_message == 'Locked "Notes" as the window target.'
+
+    bridge.set_focused_window(
+        title="AirDesk",
+        bounds=(20.0, 20.0, 640.0, 480.0),
+        pid=0,
+    )
+    times = iter([100.0, 100.25, 100.35, 100.45, 100.55, 100.65])
+    controller = SystemIntentController(
+        config=SystemControlConfig(clutch_activation_ms=180, pinch_press_delay_ms=60),
+        enabled=True,
+        time_fn=lambda: next(times),
+    )
+
+    controller.update(
+        GestureState(cursor_px=(320, 240), tracking_stable=True, clutch_pose=True),
+        640,
+        480,
+    )
+    backend.apply(
+        controller.update(
+            GestureState(cursor_px=(320, 240), tracking_stable=True, clutch_pose=True),
+            640,
+            480,
+        )
+    )
+    backend.apply(
+        controller.update(
+            GestureState(
+                cursor_px=(320, 240),
+                tracking_stable=True,
+                clutch_pose=True,
+                pinch_started=True,
+                pinch_active=True,
+            ),
+            640,
+            480,
+        )
+    )
+    backend.apply(
+        controller.update(
+            GestureState(
+                cursor_px=(320, 240),
+                tracking_stable=True,
+                clutch_pose=True,
+                pinch_active=True,
+            ),
+            640,
+            480,
+        )
+    )
+    moved = backend.apply(
+        controller.update(
+            GestureState(
+                cursor_px=(360, 260),
+                tracking_stable=True,
+                clutch_pose=True,
+                pinch_active=True,
+            ),
+            640,
+            480,
+        )
+    )
+
+    assert moved.target_locked is True
+    assert moved.target_label == "Notes"
+    assert moved.effect_label == 'Moving "Notes" to 247, 213'
+    assert bridge.calls == [("window-move", (247, 213))]
+
+
+def test_macos_backend_toggle_target_lock_clears_existing_target() -> None:
+    """The target-lock hotkey should also clear an existing locked window."""
+    bridge = FakeMacOSBridge()
+    backend = MacOSSystemBackend(bridge=bridge)
+    backend.set_control_mode(ControlMode.WINDOW)
+
+    first = backend.toggle_target_lock()
+    second = backend.toggle_target_lock()
+
+    assert first == 'Locked "Notes" as the window target.'
+    assert second == 'Cleared locked window target "Notes".'
+
+
+def test_macos_backend_window_mode_ignores_its_own_process_window() -> None:
+    """Window mode should refuse to move the AirDesk/OpenCV window itself."""
+    bridge = FakeMacOSBridge(focused_window_pid=0)
+    backend = MacOSSystemBackend(bridge=bridge)
+    backend._process_pid = 0
+    backend.set_control_mode(ControlMode.WINDOW)
+
+    state = backend.apply(
+        SystemIntentController(enabled=True, time_fn=lambda: 100.0).update(
+            GestureState(cursor_px=(320, 240), tracking_stable=True, clutch_pose=False),
+            640,
+            480,
+        )
+    )
+
+    assert state.target_label is None
+    assert "focus another app window" in state.effect_label.lower()
