@@ -1,11 +1,64 @@
 """Command-line entry point for the AirDesk prototype."""
 
+from argparse import ArgumentParser, Namespace
+from dataclasses import replace
+from typing import Sequence
+
 from airdesk.app import AirDeskApp
+from airdesk.config import AppConfig, build_default_config
 
 
-def main() -> int:
+def build_arg_parser() -> ArgumentParser:
+    """Return the CLI parser for the AirDesk app."""
+    parser = ArgumentParser(description="Launch the AirDesk in-app prototype.")
+    parser.add_argument(
+        "--camera-index",
+        type=int,
+        default=None,
+        help="Override the webcam device index.",
+    )
+    debug_hud_group = parser.add_mutually_exclusive_group()
+    debug_hud_group.add_argument(
+        "--show-debug-hud",
+        action="store_true",
+        help="Force the on-screen debug HUD to be visible.",
+    )
+    debug_hud_group.add_argument(
+        "--hide-debug-hud",
+        action="store_true",
+        help="Hide the on-screen debug HUD for a cleaner demo view.",
+    )
+    return parser
+
+
+def build_config_from_args(args: Namespace) -> AppConfig:
+    """Apply supported CLI overrides to the default app config."""
+    config = build_default_config()
+
+    if args.camera_index is not None:
+        config = replace(
+            config,
+            camera=replace(config.camera, device_index=args.camera_index),
+        )
+
+    if args.show_debug_hud:
+        config = replace(
+            config,
+            render=replace(config.render, show_debug_hud=True),
+        )
+    elif args.hide_debug_hud:
+        config = replace(
+            config,
+            render=replace(config.render, show_debug_hud=False),
+        )
+
+    return config
+
+
+def main(argv: Sequence[str] | None = None) -> int:
     """Launch the AirDesk application."""
-    app = AirDeskApp()
+    args = build_arg_parser().parse_args(argv)
+    app = AirDeskApp(config=build_config_from_args(args))
     return app.run()
 
 

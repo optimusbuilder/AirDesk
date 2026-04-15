@@ -85,6 +85,15 @@ This repository now includes a `pyproject.toml` scaffold so dependencies and dev
 Use Python 3.11 or 3.12 for now; the current `mediapipe` release used by AirDesk does not advertise Python 3.13 or 3.14 support on PyPI.
 Because AirDesk is a webcam desktop app, run it from a local GUI session and allow camera access when macOS prompts for it.
 
+Useful local commands:
+
+```bash
+pytest
+python -m airdesk.main
+python -m airdesk.main --hide-debug-hud
+python -m airdesk.main --camera-index 1
+```
+
 ## System Overview
 
 AirDesk is organized into five runtime layers:
