@@ -13,6 +13,9 @@ This repository now has the initial project scaffold plus the first two runtime 
 5. Pinch detection now exposes stable start, hold, and end signals using hand-size normalized thresholds with hysteresis
 6. A styled in-app virtual window now renders with idle and hover states driven by cursor hit-testing
 7. Pinch-to-grab now moves the virtual window with preserved grab offset and releases it cleanly in place
+8. The in-app prototype now supports multiple overlapping panels with frontmost selection and z-order updates while dragging
+
+At this point the in-app interaction prototype is functionally complete. The remaining work is polish, tuning, and any future system-integration layer.
 
 The rest of this README remains the implementation plan for the next milestones.
 

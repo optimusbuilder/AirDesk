@@ -32,6 +32,7 @@ class Renderer:
         self._draw_windows(composited, windows)
         self._draw_cursor(composited, gesture_state)
         self._draw_hand_landmarks(composited, hand_state)
+        self._draw_status_chip(composited, gesture_state, interaction_state)
 
         if self.config.show_debug_hud:
             self._draw_debug_hud(composited, hand_state, gesture_state, interaction_state)
@@ -97,8 +98,15 @@ class Renderer:
         )
 
     def _draw_window_shadow(self, frame: Any, window: VirtualWindow) -> None:
-        shadow_alpha = 0.24
-        shadow_offset = 8
+        if window.state is WindowState.GRABBED:
+            shadow_alpha = 0.34
+            shadow_offset = 12
+        elif window.state is WindowState.HOVERED:
+            shadow_alpha = 0.28
+            shadow_offset = 10
+        else:
+            shadow_alpha = 0.24
+            shadow_offset = 8
         self._draw_translucent_rect(
             frame,
             x=window.x + shadow_offset,
@@ -167,28 +175,128 @@ class Renderer:
         )
 
     def _draw_window_text(self, frame: Any, window: VirtualWindow) -> None:
+        title_font_scale = 0.54
+        title_thickness = 2
+        body_font_scale = 0.44
+        body_thickness = 1
+        body_line_height = 20
+        body_left = window.x + 14
+        body_top = window.y + 58
+        body_width = max(window.width - 28, 40)
+        body_height = max(window.height - 72, body_line_height)
+
         title_color = self._border_for_window(window)
+        dots = [
+            self.theme.panel_border,
+            self.theme.panel_hover_border,
+            self.theme.panel_grabbed_border,
+        ]
+        for index, color in enumerate(dots):
+            self._cv2.circle(
+                frame,
+                (window.x + window.width - 18 - (index * 14), window.y + 18),
+                4,
+                color,
+                -1,
+                self._cv2.LINE_AA,
+            )
+
         self._cv2.putText(
             frame,
             window.title,
             (window.x + 14, window.y + 23),
             self._cv2.FONT_HERSHEY_SIMPLEX,
-            0.62,
+            title_font_scale,
             title_color,
-            2,
+            title_thickness,
             self._cv2.LINE_AA,
         )
 
-        body_lines = window.body_lines or ("Virtual panel ready",)
-        for index, line in enumerate(body_lines):
+        wrapped_lines = self._wrap_block(
+            lines=window.body_lines or ("Virtual panel ready",),
+            max_width=body_width,
+            font_scale=body_font_scale,
+            thickness=body_thickness,
+        )
+        visible_lines = self._fit_lines_to_height(
+            lines=wrapped_lines,
+            max_height=body_height,
+            line_height=body_line_height,
+            max_width=body_width,
+            font_scale=body_font_scale,
+            thickness=body_thickness,
+        )
+
+        for index, line in enumerate(visible_lines):
             self._cv2.putText(
                 frame,
                 line,
-                (window.x + 14, window.y + 60 + (index * 24)),
+                (body_left, body_top + (index * body_line_height)),
                 self._cv2.FONT_HERSHEY_SIMPLEX,
-                0.52,
+                body_font_scale,
                 self.theme.text,
-                1,
+                body_thickness,
+                self._cv2.LINE_AA,
+            )
+
+    def _draw_status_chip(
+        self,
+        frame: Any,
+        gesture_state: GestureState,
+        interaction_state: InteractionState,
+    ) -> None:
+        chip_width = 248
+        chip_height = 92
+        margin = 18
+        chip_x = max(frame.shape[1] - chip_width - margin, margin)
+        chip_y = margin
+        self._draw_translucent_rect(
+            frame,
+            x=chip_x,
+            y=chip_y,
+            width=chip_width,
+            height=chip_height,
+            color=self.theme.panel_fill,
+            alpha=0.44,
+        )
+        self._cv2.rectangle(
+            frame,
+            (chip_x, chip_y),
+            (chip_x + chip_width, chip_y + chip_height),
+            self.theme.panel_border,
+            1,
+            self._cv2.LINE_AA,
+        )
+
+        if interaction_state.grabbed_window_id is not None:
+            status = f"Dragging {interaction_state.grabbed_window_id}"
+            status_color = self.theme.panel_grabbed_border
+        elif interaction_state.hovered_window_id is not None:
+            status = f"Hovering {interaction_state.hovered_window_id}"
+            status_color = self.theme.panel_hover_border
+        elif gesture_state.tracking_stable:
+            status = "Hand tracked"
+            status_color = self.theme.cursor
+        else:
+            status = "Show one hand to begin"
+            status_color = self.theme.text
+
+        lines = [
+            "Point to hover",
+            "Pinch to grab and drag",
+            status,
+        ]
+
+        for index, line in enumerate(lines):
+            color = status_color if index == len(lines) - 1 else self.theme.text
+            self._cv2.putText(
+                frame,
+                line,
+                (chip_x + 14, chip_y + 26 + (index * 24)),
+                self._cv2.FONT_HERSHEY_SIMPLEX,
+                0.56,
+                color,
+                2 if index == len(lines) - 1 else 1,
                 self._cv2.LINE_AA,
             )
 
@@ -199,47 +307,74 @@ class Renderer:
         gesture_state: GestureState,
         interaction_state: InteractionState,
     ) -> None:
+        font_scale = 0.46
+        thickness = 1
+        line_height = 18
+        padding_x = 12
+        padding_y = 12
+        title = "Debug HUD"
         lines = [
-            f"Hand: {'detected' if hand_state.detected else 'not detected'}",
-            f"Confidence: {hand_state.confidence:.2f}",
-            f"Tracking: {'stable' if gesture_state.tracking_stable else 'lost'}",
+            f"Hand: {'detected' if hand_state.detected else 'missing'}",
+            f"Conf: {hand_state.confidence:.2f}",
+            f"Track: {'stable' if gesture_state.tracking_stable else 'lost'}",
             f"Pinch: {'active' if gesture_state.pinch_active else 'idle'}",
-            f"Hovered window: {interaction_state.hovered_window_id or 'none'}",
-            f"Grabbed window: {interaction_state.grabbed_window_id or 'none'}",
+            f"Hover: {interaction_state.hovered_window_id or '-'}",
+            f"Grab: {interaction_state.grabbed_window_id or '-'}",
         ]
-
-        if hand_state.detected and hand_state.index_tip is not None:
-            lines.append(f"Index tip: {hand_state.index_tip[0]}, {hand_state.index_tip[1]}")
-            lines.append(f"Hand scale: {hand_state.hand_scale:.1f}px")
-
-        if gesture_state.raw_cursor_px is not None:
-            lines.append(
-                f"Raw cursor: {gesture_state.raw_cursor_px[0]}, {gesture_state.raw_cursor_px[1]}"
-            )
 
         if gesture_state.cursor_px is not None:
             lines.append(f"Cursor: {gesture_state.cursor_px[0]}, {gesture_state.cursor_px[1]}")
 
         if math.isfinite(gesture_state.pinch_ratio):
-            lines.append(f"Pinch ratio: {gesture_state.pinch_ratio:.3f}")
-        elif hand_state.detected:
-            lines.append("Pinch ratio: n/a")
+            lines.append(f"Ratio: {gesture_state.pinch_ratio:.3f}")
 
-        if gesture_state.pinch_started:
-            lines.append("Pinch event: started")
-        elif gesture_state.pinch_ended:
-            lines.append("Pinch event: ended")
+        content_width = max(
+            self._measure_text(title, font_scale=0.5, thickness=2)[0],
+            *(self._measure_text(line, font_scale=font_scale, thickness=thickness)[0] for line in lines),
+        )
+        card_width = content_width + (padding_x * 2)
+        card_height = 30 + (len(lines) * line_height) + padding_y
+        card_x = 18
+        card_y = 18
+
+        self._draw_translucent_rect(
+            frame,
+            x=card_x,
+            y=card_y,
+            width=card_width,
+            height=card_height,
+            color=self.theme.panel_fill,
+            alpha=0.48,
+        )
+        self._cv2.rectangle(
+            frame,
+            (card_x, card_y),
+            (card_x + card_width, card_y + card_height),
+            self.theme.panel_border,
+            1,
+            self._cv2.LINE_AA,
+        )
+        self._cv2.putText(
+            frame,
+            title,
+            (card_x + padding_x, card_y + 20),
+            self._cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            self.theme.panel_hover_border,
+            2,
+            self._cv2.LINE_AA,
+        )
 
         for line_number, text in enumerate(lines):
-            y = 28 + (line_number * 24)
+            y = card_y + 42 + (line_number * line_height)
             self._cv2.putText(
                 frame,
                 text,
-                (16, y),
+                (card_x + padding_x, y),
                 self._cv2.FONT_HERSHEY_SIMPLEX,
-                0.65,
+                font_scale,
                 self.theme.text,
-                2,
+                thickness,
                 self._cv2.LINE_AA,
             )
 
@@ -264,6 +399,115 @@ class Renderer:
             self._cv2.LINE_AA,
         )
         self._cv2.addWeighted(overlay, alpha, frame, 1.0 - alpha, 0.0, frame)
+
+    def _wrap_block(
+        self,
+        *,
+        lines: tuple[str, ...],
+        max_width: int,
+        font_scale: float,
+        thickness: int,
+    ) -> list[str]:
+        wrapped_lines: list[str] = []
+        for line in lines:
+            wrapped_lines.extend(
+                self._wrap_text(
+                    text=line,
+                    max_width=max_width,
+                    font_scale=font_scale,
+                    thickness=thickness,
+                )
+            )
+        return wrapped_lines
+
+    def _wrap_text(
+        self,
+        *,
+        text: str,
+        max_width: int,
+        font_scale: float,
+        thickness: int,
+    ) -> list[str]:
+        words = text.split()
+        if not words:
+            return [""]
+
+        wrapped: list[str] = []
+        current = words[0]
+        for word in words[1:]:
+            candidate = f"{current} {word}"
+            candidate_width, _ = self._measure_text(
+                candidate,
+                font_scale=font_scale,
+                thickness=thickness,
+            )
+            if candidate_width <= max_width:
+                current = candidate
+            else:
+                wrapped.append(current)
+                current = word
+
+        wrapped.append(current)
+        return wrapped
+
+    def _fit_lines_to_height(
+        self,
+        *,
+        lines: list[str],
+        max_height: int,
+        line_height: int,
+        max_width: int,
+        font_scale: float,
+        thickness: int,
+    ) -> list[str]:
+        max_lines = max(max_height // line_height, 1)
+        if len(lines) <= max_lines:
+            return lines
+
+        clipped = lines[:max_lines]
+        clipped[-1] = self._ellipsize_text(
+            text=clipped[-1],
+            max_width=max_width,
+            font_scale=font_scale,
+            thickness=thickness,
+        )
+        return clipped
+
+    def _ellipsize_text(
+        self,
+        *,
+        text: str,
+        max_width: int,
+        font_scale: float,
+        thickness: int,
+    ) -> str:
+        candidate = text.rstrip()
+        ellipsis = "..."
+        while candidate:
+            width, _ = self._measure_text(
+                f"{candidate}{ellipsis}",
+                font_scale=font_scale,
+                thickness=thickness,
+            )
+            if width <= max_width:
+                return f"{candidate}{ellipsis}"
+            candidate = candidate[:-1].rstrip()
+        return ellipsis
+
+    def _measure_text(
+        self,
+        text: str,
+        *,
+        font_scale: float,
+        thickness: int,
+    ) -> tuple[int, int]:
+        (width, height), _ = self._cv2.getTextSize(
+            text,
+            self._cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale,
+            thickness,
+        )
+        return width, height
 
     def _border_for_window(self, window: VirtualWindow) -> tuple[int, int, int]:
         if window.state is WindowState.GRABBED:

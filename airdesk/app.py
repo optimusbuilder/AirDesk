@@ -36,7 +36,7 @@ class AirDeskApp:
         interaction_state = InteractionState()
         window_manager = WindowManager()
 
-        print("Starting AirDesk Milestone 6 runtime. Press Q or Esc to quit.")
+        print("Starting AirDesk in-app prototype. Press Q or Esc to quit.")
 
         try:
             camera_stream.open()
@@ -68,14 +68,22 @@ class AirDeskApp:
                     window_manager.ordered_windows(),
                     interaction_state,
                 )
+                footer_text = "AirDesk Prototype | Q or Esc to quit"
+                (footer_width, _), _ = cv2.getTextSize(
+                    footer_text,
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    1,
+                )
+                footer_x = max(frame.width - footer_width - 18, 18)
                 cv2.putText(
                     display_frame,
-                    "AirDesk Milestone 6  |  Press Q or Esc to quit",
-                    (16, frame.height - 20),
+                    footer_text,
+                    (footer_x, frame.height - 18),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
+                    0.5,
                     (255, 255, 255),
-                    2,
+                    1,
                     cv2.LINE_AA,
                 )
                 cv2.imshow(self.window_title, display_frame)
@@ -101,27 +109,56 @@ class AirDeskApp:
         return return_code
 
     def _seed_windows(self, window_manager: WindowManager, frame_width: int, frame_height: int) -> None:
-        """Create the initial MVP panel once frame dimensions are known."""
+        """Create the initial in-app prototype panels once frame dimensions are known."""
         if window_manager.windows:
             return
 
-        window_width = min(280, max(frame_width - 220, 220))
-        window_height = min(170, max(frame_height - 260, 140))
-        window_x = max((frame_width - window_width) // 2, 32)
-        window_y = max(56, frame_height // 7)
-        window_manager.add_window(
-            VirtualWindow(
-                id="air-panel-1",
-                title="Air Panel",
-                x=window_x,
-                y=window_y,
-                width=window_width,
-                height=window_height,
-                body_lines=(
-                    "Hover with the fingertip cursor.",
-                    "Pinch and drag to move this panel.",
-                    "Release the pinch to drop it in place.",
-                    "This panel is fully in-app for now.",
-                ),
-            )
+        primary_width = min(300, max(frame_width // 2 - 30, 230))
+        primary_height = 196
+        secondary_width = min(268, max(frame_width // 3, 216))
+        secondary_height = 168
+
+        primary = VirtualWindow(
+            id="air-panel-main",
+            title="Air Panel",
+            x=max((frame_width - primary_width) // 2 - 28, 28),
+            y=max(frame_height // 7, 68),
+            width=primary_width,
+            height=primary_height,
+            body_lines=(
+                "Point with your index finger to hover.",
+                "Pinch and drag to move any panel.",
+                "Release the pinch to drop it in place.",
+                "This is the core in-app prototype.",
+            ),
         )
+        notes = VirtualWindow(
+            id="air-panel-notes",
+            title="Gesture Notes",
+            x=max(primary.x - 92, 20),
+            y=min(primary.y + 118, max(frame_height - secondary_height - 24, 24)),
+            width=secondary_width,
+            height=secondary_height,
+            body_lines=(
+                "One hand tracked with MediaPipe.",
+                "Cursor is smoothed with an EMA.",
+                "Pinch uses normalized distance plus hysteresis.",
+            ),
+        )
+        monitor = VirtualWindow(
+            id="air-panel-monitor",
+            title="Interaction Monitor",
+            x=min(primary.x + primary.width - 84, max(frame_width - secondary_width - 20, 20)),
+            y=min(primary.y + 52, max(frame_height - secondary_height - 24, 24)),
+            width=secondary_width,
+            height=secondary_height,
+            body_lines=(
+                "Topmost panel wins hover selection.",
+                "Grabbed panels come to the front.",
+                "Short hand-loss grace prevents accidental drops.",
+            ),
+        )
+
+        for window in (notes, primary, monitor):
+            window.clamp_within(frame_width, frame_height)
+            window_manager.add_window(window)

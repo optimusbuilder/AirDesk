@@ -14,6 +14,8 @@ class WindowManager:
 
     def add_window(self, window: VirtualWindow) -> None:
         """Add a new window to the manager."""
+        next_z_index = max((item.z_index for item in self.windows), default=-1) + 1
+        window.z_index = max(window.z_index, next_z_index)
         self.windows.append(window)
 
     def ordered_windows(self) -> list[VirtualWindow]:
