@@ -38,7 +38,7 @@ class AirDeskApp:
         renderer = Renderer(config=self.config.render)
         gesture_engine = GestureEngine(config=self.config.gestures)
         interaction_controller = InteractionController(config=self.config.gestures)
-        system_controller = SystemIntentController()
+        system_controller = SystemIntentController(config=self.config.system)
         system_armed = self.config.system.mode is AppMode.SYSTEM_SHADOW or (
             self.config.system.mode is AppMode.SYSTEM_MACOS
             and self.config.system.enable_live_backend
@@ -189,6 +189,7 @@ class AirDeskApp:
         if self.config.system.mode is AppMode.SYSTEM_SHADOW:
             system_controller.enabled = True
             state = system_controller.update(gesture_state, frame_width, frame_height)
+            state.armed = True
             if system_backend is not None:
                 state = system_backend.apply(state)
             return state
@@ -198,6 +199,7 @@ class AirDeskApp:
             system_controller.reset()
             return SystemControlState(
                 enabled=True,
+                armed=False,
                 backend_name="macos",
                 phase=PointerPhase.IDLE,
                 effect_label="Live control locked - relaunch with --enable-system-actions",
@@ -207,6 +209,7 @@ class AirDeskApp:
             system_controller.reset()
             return SystemControlState(
                 enabled=True,
+                armed=False,
                 backend_name="macos",
                 phase=PointerPhase.IDLE,
                 effect_label="Live control disarmed - press S to arm",
@@ -214,6 +217,7 @@ class AirDeskApp:
 
         system_controller.enabled = True
         state = system_controller.update(gesture_state, frame_width, frame_height)
+        state.armed = True
         if system_backend is not None:
             state = system_backend.apply(state)
         return state
@@ -248,7 +252,7 @@ class AirDeskApp:
             if not self.config.system.enable_live_backend:
                 return "AirDesk macOS Control | Relaunch with --enable-system-actions"
             toggle_label = "Disarm" if system_armed else "Arm"
-            return f"AirDesk macOS Control | S to {toggle_label} | Q or Esc to quit"
+            return f"AirDesk macOS Control | S to {toggle_label} | Open palm to steer | Q to quit"
         return "AirDesk Prototype | Q or Esc to quit"
 
     def _seed_windows(self, window_manager: WindowManager, frame_width: int, frame_height: int) -> None:

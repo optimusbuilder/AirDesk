@@ -65,6 +65,11 @@ class SystemControlConfig:
     mode: AppMode = AppMode.PROTOTYPE
     enable_live_backend: bool = False
     start_armed: bool = False
+    clutch_activation_ms: int = 180
+    pinch_press_delay_ms: int = 60
+    cursor_edge_padding: float = 0.08
+    cursor_sensitivity: float = 1.18
+    cursor_deadzone_px: int = 6
 
 
 @dataclass(frozen=True, slots=True)

@@ -15,4 +15,5 @@ class GestureState:
     pinch_active: bool = False
     pinch_started: bool = False
     pinch_ended: bool = False
+    clutch_pose: bool = False
     tracking_stable: bool = False

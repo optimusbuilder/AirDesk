@@ -348,13 +348,18 @@ class Renderer:
             f"Conf: {hand_state.confidence:.2f}",
             f"Track: {'stable' if gesture_state.tracking_stable else 'lost'}",
             f"Pinch: {'active' if gesture_state.pinch_active else 'idle'}",
+            f"Clutch pose: {'yes' if gesture_state.clutch_pose else 'no'}",
             f"Hover: {interaction_state.hovered_window_id or '-'}",
             f"Grab: {interaction_state.grabbed_window_id or '-'}",
         ]
 
         if system_state.enabled:
+            lines.append(f"Armed: {'yes' if system_state.armed else 'no'}")
+            lines.append(f"Clutch: {'engaged' if system_state.clutch_engaged else 'idle'}")
             lines.append(f"System: {system_state.phase.value}")
             lines.append(f"Backend: {system_state.backend_name}")
+            if system_state.permission_granted is not None:
+                lines.append(f"Trust: {'yes' if system_state.permission_granted else 'no'}")
 
         if gesture_state.cursor_px is not None:
             lines.append(f"Cursor: {gesture_state.cursor_px[0]}, {gesture_state.cursor_px[1]}")

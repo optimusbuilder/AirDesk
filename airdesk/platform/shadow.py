@@ -20,11 +20,13 @@ class ShadowSystemBackend(SystemBackend):
 
     def _describe(self, state: SystemControlState) -> str:
         if state.phase is PointerPhase.LOST:
-            return "Shadow mode waiting for one tracked hand"
+            return state.effect_label
         if state.phase is PointerPhase.RELEASE and state.frame_cursor_px is None:
             return "Shadow mode would release after tracking loss"
+        if state.phase is PointerPhase.IDLE:
+            return state.effect_label
         if state.frame_cursor_px is None:
-            return "Shadow mode idle"
+            return state.effect_label
 
         x, y = state.frame_cursor_px
         if state.phase is PointerPhase.PRESS:

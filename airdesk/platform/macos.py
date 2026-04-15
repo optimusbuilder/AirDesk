@@ -168,10 +168,12 @@ class MacOSSystemBackend(SystemBackend):
         state.backend_name = self.name
 
         if not self.bridge.accessibility_is_trusted():
+            state.permission_granted = False
             state.effect_label = (
                 "Grant Accessibility access to this Python app or terminal to enable live control"
             )
             return state
+        state.permission_granted = True
 
         screen_point = self._screen_point_for_state(state)
         if screen_point is not None:
@@ -179,6 +181,8 @@ class MacOSSystemBackend(SystemBackend):
 
         if state.phase is PointerPhase.LOST:
             state.effect_label = "Live macOS control waiting for one tracked hand"
+            return state
+        if state.phase is PointerPhase.IDLE:
             return state
 
         if state.phase is PointerPhase.PRESS and screen_point is not None:

@@ -16,6 +16,7 @@ This repository now has the initial project scaffold plus the first two runtime 
 8. The in-app prototype now supports multiple overlapping panels with frontmost selection and z-order updates while dragging
 9. A first system-control architecture now exists behind `--mode system-shadow`, translating gestures into backend-agnostic pointer intents without touching the real OS yet
 10. Experimental live macOS cursor control now exists behind `--mode system-macos --enable-system-actions`, with a runtime `S` arm/disarm safety toggle
+11. System-control modes now use an open-palm clutch plus a short pinch debounce, with calmer pointer shaping for safer live control
 
 At this point the in-app interaction prototype is functionally complete. The remaining work is polish, tuning, and any future system-integration layer.
 

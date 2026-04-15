@@ -9,6 +9,14 @@ from airdesk.models.gesture import GestureState
 from airdesk.models.hand import HandState, PixelPoint
 
 
+_CLUTCH_FINGER_PAIRS = (
+    (5, 8),
+    (9, 12),
+    (13, 16),
+    (17, 20),
+)
+
+
 @dataclass(slots=True)
 class GestureEngine:
     """Converts hand landmarks into higher-level gesture signals."""
@@ -44,6 +52,7 @@ class GestureEngine:
             pinch_active=pinch_active,
             pinch_started=pinch_started,
             pinch_ended=pinch_ended,
+            clutch_pose=self._compute_clutch_pose(hand_state),
             tracking_stable=True,
         )
 
@@ -58,3 +67,23 @@ class GestureEngine:
         if self.previous_pinch_active:
             return pinch_ratio <= self.config.pinch_off_threshold
         return pinch_ratio <= self.config.pinch_on_threshold
+
+    @staticmethod
+    def _compute_clutch_pose(hand_state: HandState) -> bool:
+        palm_center = hand_state.palm_center
+        if palm_center is None or not hand_state.landmarks_px:
+            return False
+
+        extended_fingers = 0
+        for mcp_id, tip_id in _CLUTCH_FINGER_PAIRS:
+            mcp = hand_state.landmarks_px.get(mcp_id)
+            tip = hand_state.landmarks_px.get(tip_id)
+            if mcp is None or tip is None:
+                continue
+
+            tip_distance = math.dist(tip, palm_center)
+            mcp_distance = math.dist(mcp, palm_center)
+            if tip_distance >= max(mcp_distance * 1.6, hand_state.hand_scale * 0.75):
+                extended_fingers += 1
+
+        return extended_fingers >= 3

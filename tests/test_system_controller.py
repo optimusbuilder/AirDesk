@@ -2,7 +2,7 @@
 
 from argparse import Namespace
 
-from airdesk.config import AppMode
+from airdesk.config import AppMode, SystemControlConfig
 from airdesk.main import build_arg_parser, build_config_from_args, validate_args
 from airdesk.models.gesture import GestureState
 from airdesk.platform.macos import MacOSSystemBackend
@@ -27,14 +27,40 @@ def test_disabled_system_controller_returns_disabled_state() -> None:
 
 
 def test_system_controller_emits_move_press_drag_release_flow() -> None:
-    """Gesture transitions should map cleanly to pointer-style intents."""
-    controller = SystemIntentController(enabled=True)
+    """Gesture transitions should map cleanly once the clutch is engaged."""
+    times = iter([100.0, 100.25, 100.31, 100.40, 100.50, 100.60, 100.70])
+    controller = SystemIntentController(
+        config=SystemControlConfig(clutch_activation_ms=180, pinch_press_delay_ms=60),
+        enabled=True,
+        time_fn=lambda: next(times),
+    )
 
-    move = controller.update(GestureState(cursor_px=(100, 120), tracking_stable=True), 640, 480)
+    waiting = controller.update(
+        GestureState(cursor_px=(100, 120), tracking_stable=True, clutch_pose=True),
+        640,
+        480,
+    )
+    move = controller.update(
+        GestureState(cursor_px=(100, 120), tracking_stable=True, clutch_pose=True),
+        640,
+        480,
+    )
+    debounce = controller.update(
+        GestureState(
+            cursor_px=(100, 120),
+            tracking_stable=True,
+            clutch_pose=True,
+            pinch_started=True,
+            pinch_active=True,
+        ),
+        640,
+        480,
+    )
     press = controller.update(
         GestureState(
             cursor_px=(100, 120),
             tracking_stable=True,
+            clutch_pose=True,
             pinch_started=True,
             pinch_active=True,
         ),
@@ -42,19 +68,22 @@ def test_system_controller_emits_move_press_drag_release_flow() -> None:
         480,
     )
     drag = controller.update(
-        GestureState(cursor_px=(140, 180), tracking_stable=True, pinch_active=True),
+        GestureState(cursor_px=(140, 180), tracking_stable=True, clutch_pose=True, pinch_active=True),
         640,
         480,
     )
     release = controller.update(
-        GestureState(cursor_px=(140, 180), tracking_stable=True, pinch_ended=True),
+        GestureState(cursor_px=(140, 180), tracking_stable=True, clutch_pose=True, pinch_ended=True),
         640,
         480,
     )
 
+    assert waiting.phase is PointerPhase.IDLE
     assert move.phase is PointerPhase.MOVE
     assert move.normalized_cursor is not None
     assert move.button_down is False
+    assert debounce.phase is PointerPhase.MOVE
+    assert "Hold the pinch briefly" in debounce.effect_label
     assert press.phase is PointerPhase.PRESS
     assert press.button_down is True
     assert drag.phase is PointerPhase.DRAG
@@ -65,12 +94,33 @@ def test_system_controller_emits_move_press_drag_release_flow() -> None:
 
 def test_tracking_loss_forces_release_when_button_was_down() -> None:
     """Losing the hand while dragging should produce a safe forced release."""
-    controller = SystemIntentController(enabled=True)
+    times = iter([100.0, 100.25, 100.40, 100.50])
+    controller = SystemIntentController(
+        config=SystemControlConfig(clutch_activation_ms=180, pinch_press_delay_ms=60),
+        enabled=True,
+        time_fn=lambda: next(times),
+    )
+    controller.update(
+        GestureState(cursor_px=(200, 200), tracking_stable=True, clutch_pose=True),
+        640,
+        480,
+    )
     controller.update(
         GestureState(
             cursor_px=(200, 200),
             tracking_stable=True,
+            clutch_pose=True,
             pinch_started=True,
+            pinch_active=True,
+        ),
+        640,
+        480,
+    )
+    controller.update(
+        GestureState(
+            cursor_px=(200, 200),
+            tracking_stable=True,
+            clutch_pose=True,
             pinch_active=True,
         ),
         640,
@@ -86,11 +136,18 @@ def test_tracking_loss_forces_release_when_button_was_down() -> None:
 
 def test_shadow_backend_labels_actions_human_readably() -> None:
     """Shadow backend should annotate emitted system intents for the UI."""
-    controller = SystemIntentController(enabled=True)
+    times = iter([100.0, 100.25])
+    controller = SystemIntentController(enabled=True, time_fn=lambda: next(times))
     backend = ShadowSystemBackend()
 
+    controller.update(
+        GestureState(cursor_px=(250, 160), tracking_stable=True, clutch_pose=True),
+        640,
+        480,
+    )
+
     state = controller.update(
-        GestureState(cursor_px=(250, 160), tracking_stable=True),
+        GestureState(cursor_px=(250, 160), tracking_stable=True, clutch_pose=True),
         640,
         480,
     )
@@ -99,6 +156,53 @@ def test_shadow_backend_labels_actions_human_readably() -> None:
     assert state.backend_name == "shadow"
     assert state.phase is PointerPhase.MOVE
     assert "Shadow move" in state.effect_label
+
+
+def test_system_controller_requires_clutch_pose_before_moving() -> None:
+    """System control should wait for an open-palm clutch before steering."""
+    controller = SystemIntentController(enabled=True, time_fn=lambda: 100.0)
+
+    state = controller.update(
+        GestureState(cursor_px=(180, 120), tracking_stable=True, clutch_pose=False),
+        640,
+        480,
+    )
+
+    assert state.phase is PointerPhase.IDLE
+    assert state.clutch_engaged is False
+    assert "open palm" in state.effect_label.lower()
+
+
+def test_system_controller_deadzone_reuses_previous_output_cursor() -> None:
+    """Tiny cursor shifts should be filtered by the controller deadzone."""
+    times = iter([100.0, 100.25, 100.30])
+    controller = SystemIntentController(
+        config=SystemControlConfig(
+            clutch_activation_ms=180,
+            pinch_press_delay_ms=60,
+            cursor_deadzone_px=12,
+        ),
+        enabled=True,
+        time_fn=lambda: next(times),
+    )
+
+    controller.update(
+        GestureState(cursor_px=(200, 200), tracking_stable=True, clutch_pose=True),
+        640,
+        480,
+    )
+    first_move = controller.update(
+        GestureState(cursor_px=(200, 200), tracking_stable=True, clutch_pose=True),
+        640,
+        480,
+    )
+    second_move = controller.update(
+        GestureState(cursor_px=(204, 202), tracking_stable=True, clutch_pose=True),
+        640,
+        480,
+    )
+
+    assert first_move.normalized_cursor == second_move.normalized_cursor
 
 
 def test_live_system_flags_are_applied_to_config() -> None:
@@ -170,8 +274,36 @@ def test_macos_backend_maps_normalized_cursor_to_main_display() -> None:
     backend = MacOSSystemBackend(bridge=FakeMacOSBridge())
 
     state = backend.apply(
-        SystemIntentController(enabled=True).update(
-            GestureState(cursor_px=(320, 240), tracking_stable=True),
+        SystemIntentController(
+            enabled=True,
+            time_fn=lambda: 100.0,
+        ).update(
+            GestureState(cursor_px=(320, 240), tracking_stable=True, clutch_pose=False),
+            640,
+            480,
+        )
+    )
+
+    assert state.backend_name == "macos"
+    assert "open palm" in state.effect_label.lower()
+    assert backend.bridge.calls == []
+
+
+def test_macos_backend_moves_after_clutch_is_engaged() -> None:
+    """Live backend should move the real pointer only after the clutch engages."""
+    bridge = FakeMacOSBridge()
+    backend = MacOSSystemBackend(bridge=bridge)
+    times = iter([100.0, 100.25])
+    controller = SystemIntentController(enabled=True, time_fn=lambda: next(times))
+
+    controller.update(
+        GestureState(cursor_px=(320, 240), tracking_stable=True, clutch_pose=True),
+        640,
+        480,
+    )
+    state = backend.apply(
+        controller.update(
+            GestureState(cursor_px=(320, 240), tracking_stable=True, clutch_pose=True),
             640,
             480,
         )
@@ -179,7 +311,7 @@ def test_macos_backend_maps_normalized_cursor_to_main_display() -> None:
 
     assert state.backend_name == "macos"
     assert "Live macOS move" in state.effect_label
-    assert backend.bridge.calls == [("move", (721, 450))]
+    assert bridge.calls == [("move", (721, 451))]
 
 
 def test_macos_backend_requires_accessibility_permission() -> None:
@@ -188,8 +320,8 @@ def test_macos_backend_requires_accessibility_permission() -> None:
     backend = MacOSSystemBackend(bridge=bridge)
 
     state = backend.apply(
-        SystemIntentController(enabled=True).update(
-            GestureState(cursor_px=(320, 240), tracking_stable=True),
+        SystemIntentController(enabled=True, time_fn=lambda: 100.0).update(
+            GestureState(cursor_px=(320, 240), tracking_stable=True, clutch_pose=False),
             640,
             480,
         )
@@ -197,20 +329,45 @@ def test_macos_backend_requires_accessibility_permission() -> None:
 
     assert bridge.calls == []
     assert "Accessibility" in state.effect_label
+    assert state.permission_granted is False
 
 
 def test_macos_backend_reset_releases_any_held_button() -> None:
     """Disarming live control should release the primary button safely."""
     bridge = FakeMacOSBridge()
     backend = MacOSSystemBackend(bridge=bridge)
-    controller = SystemIntentController(enabled=True)
+    times = iter([100.0, 100.25, 100.35, 100.45])
+    controller = SystemIntentController(
+        config=SystemControlConfig(clutch_activation_ms=180, pinch_press_delay_ms=60),
+        enabled=True,
+        time_fn=lambda: next(times),
+    )
+
+    controller.update(
+        GestureState(cursor_px=(320, 240), tracking_stable=True, clutch_pose=True),
+        640,
+        480,
+    )
 
     backend.apply(
         controller.update(
             GestureState(
                 cursor_px=(320, 240),
                 tracking_stable=True,
+                clutch_pose=True,
                 pinch_started=True,
+                pinch_active=True,
+            ),
+            640,
+            480,
+        )
+    )
+    backend.apply(
+        controller.update(
+            GestureState(
+                cursor_px=(320, 240),
+                tracking_stable=True,
+                clutch_pose=True,
                 pinch_active=True,
             ),
             640,
@@ -219,4 +376,4 @@ def test_macos_backend_reset_releases_any_held_button() -> None:
     )
     backend.reset()
 
-    assert bridge.calls == [("down", (721, 450)), ("up", (721, 450))]
+    assert bridge.calls == [("move", (721, 451)), ("down", (721, 451)), ("up", (721, 451))]
