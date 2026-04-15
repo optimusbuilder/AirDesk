@@ -1,11 +1,19 @@
 """Configuration models for AirDesk."""
 
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 DEFAULT_HAND_LANDMARKER_PATH = PACKAGE_ROOT / "assets" / "hand_landmarker.task"
+
+
+class AppMode(StrEnum):
+    """Top-level runtime mode for the AirDesk app."""
+
+    PROTOTYPE = "prototype"
+    SYSTEM_SHADOW = "system-shadow"
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +58,13 @@ class RenderConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class SystemControlConfig:
+    """System-control mode configuration."""
+
+    mode: AppMode = AppMode.PROTOTYPE
+
+
+@dataclass(frozen=True, slots=True)
 class AppConfig:
     """Top-level application configuration."""
 
@@ -57,6 +72,7 @@ class AppConfig:
     tracking: TrackingConfig = TrackingConfig()
     gestures: GestureConfig = GestureConfig()
     render: RenderConfig = RenderConfig()
+    system: SystemControlConfig = SystemControlConfig()
 
 
 def build_default_config() -> AppConfig:

@@ -5,12 +5,18 @@ from dataclasses import replace
 from typing import Sequence
 
 from airdesk.app import AirDeskApp
-from airdesk.config import AppConfig, build_default_config
+from airdesk.config import AppConfig, AppMode, build_default_config
 
 
 def build_arg_parser() -> ArgumentParser:
     """Return the CLI parser for the AirDesk app."""
-    parser = ArgumentParser(description="Launch the AirDesk in-app prototype.")
+    parser = ArgumentParser(description="Launch the AirDesk prototype or system-shadow mode.")
+    parser.add_argument(
+        "--mode",
+        choices=[mode.value for mode in AppMode],
+        default=AppMode.PROTOTYPE.value,
+        help="Choose the runtime mode.",
+    )
     parser.add_argument(
         "--camera-index",
         type=int,
@@ -34,6 +40,10 @@ def build_arg_parser() -> ArgumentParser:
 def build_config_from_args(args: Namespace) -> AppConfig:
     """Apply supported CLI overrides to the default app config."""
     config = build_default_config()
+    config = replace(
+        config,
+        system=replace(config.system, mode=AppMode(args.mode)),
+    )
 
     if args.camera_index is not None:
         config = replace(

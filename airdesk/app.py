@@ -2,12 +2,15 @@
 
 from dataclasses import dataclass, field
 
-from airdesk.config import AppConfig, build_default_config
+from airdesk.config import AppConfig, AppMode, build_default_config
 from airdesk.core.interaction_controller import InteractionController
 from airdesk.core.window_manager import WindowManager
 from airdesk.gestures.gesture_engine import GestureEngine
 from airdesk.models.interaction import InteractionState
 from airdesk.models.window import VirtualWindow
+from airdesk.platform.shadow import ShadowSystemBackend
+from airdesk.system.controller import SystemIntentController
+from airdesk.system.intents import SystemControlState
 from airdesk.ui.renderer import Renderer
 from airdesk.vision.camera import CameraStream
 from airdesk.vision.hand_tracker import HandTracker
@@ -33,10 +36,22 @@ class AirDeskApp:
         renderer = Renderer(config=self.config.render)
         gesture_engine = GestureEngine(config=self.config.gestures)
         interaction_controller = InteractionController(config=self.config.gestures)
+        system_controller = SystemIntentController(
+            enabled=self.config.system.mode is AppMode.SYSTEM_SHADOW
+        )
+        system_backend = (
+            ShadowSystemBackend() if self.config.system.mode is AppMode.SYSTEM_SHADOW else None
+        )
+        system_state = SystemControlState()
         interaction_state = InteractionState()
         window_manager = WindowManager()
 
-        print("Starting AirDesk in-app prototype. Press Q or Esc to quit.")
+        mode_label = (
+            "system shadow mode"
+            if self.config.system.mode is AppMode.SYSTEM_SHADOW
+            else "in-app prototype"
+        )
+        print(f"Starting AirDesk {mode_label}. Press Q or Esc to quit.")
 
         try:
             camera_stream.open()
@@ -51,24 +66,34 @@ class AirDeskApp:
             hand_tracker = HandTracker(self.config.tracking)
             while True:
                 frame = camera_stream.read()
-                self._seed_windows(window_manager, frame.width, frame.height)
                 hand_state = hand_tracker.detect(frame.image)
                 gesture_state = gesture_engine.update(hand_state)
-                interaction_state = interaction_controller.update(
-                    gesture_state,
-                    window_manager,
-                    interaction_state,
-                    frame.width,
-                    frame.height,
-                )
+                if self.config.system.mode is AppMode.PROTOTYPE:
+                    self._seed_windows(window_manager, frame.width, frame.height)
+                    interaction_state = interaction_controller.update(
+                        gesture_state,
+                        window_manager,
+                        interaction_state,
+                        frame.width,
+                        frame.height,
+                    )
+                else:
+                    interaction_state = InteractionState()
+
+                system_state = system_controller.update(gesture_state, frame.width, frame.height)
+                if system_backend is not None:
+                    system_state = system_backend.apply(system_state)
+
                 display_frame = renderer.render(
                     frame.image,
                     hand_state,
                     gesture_state,
                     window_manager.ordered_windows(),
                     interaction_state,
+                    system_state=system_state,
+                    app_mode=self.config.system.mode,
                 )
-                footer_text = "AirDesk Prototype | Q or Esc to quit"
+                footer_text = self._footer_text()
                 (footer_width, _), _ = cv2.getTextSize(
                     footer_text,
                     cv2.FONT_HERSHEY_SIMPLEX,
@@ -107,6 +132,12 @@ class AirDeskApp:
             print("AirDesk shutdown complete.")
 
         return return_code
+
+    def _footer_text(self) -> str:
+        """Return footer text for the active runtime mode."""
+        if self.config.system.mode is AppMode.SYSTEM_SHADOW:
+            return "AirDesk System Shadow | Q or Esc to quit"
+        return "AirDesk Prototype | Q or Esc to quit"
 
     def _seed_windows(self, window_manager: WindowManager, frame_width: int, frame_height: int) -> None:
         """Create the initial in-app prototype panels once frame dimensions are known."""

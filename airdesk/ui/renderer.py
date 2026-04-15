@@ -3,11 +3,12 @@
 import math
 from typing import Any
 
-from airdesk.config import RenderConfig
+from airdesk.config import AppMode, RenderConfig
 from airdesk.models.gesture import GestureState
 from airdesk.models.hand import HAND_CONNECTIONS, HandState
 from airdesk.models.interaction import InteractionState
 from airdesk.models.window import VirtualWindow, WindowState
+from airdesk.system.intents import SystemControlState
 from airdesk.ui.theme import DEFAULT_THEME, Theme
 
 
@@ -26,16 +27,31 @@ class Renderer:
         gesture_state: GestureState,
         windows: list[VirtualWindow],
         interaction_state: InteractionState,
+        system_state: SystemControlState | None = None,
+        app_mode: AppMode = AppMode.PROTOTYPE,
     ) -> Any:
         """Compose the current frame."""
         composited = frame.copy()
         self._draw_windows(composited, windows)
         self._draw_cursor(composited, gesture_state)
         self._draw_hand_landmarks(composited, hand_state)
-        self._draw_status_chip(composited, gesture_state, interaction_state)
+        self._draw_status_chip(
+            composited,
+            gesture_state,
+            interaction_state,
+            system_state or SystemControlState(),
+            app_mode,
+        )
 
         if self.config.show_debug_hud:
-            self._draw_debug_hud(composited, hand_state, gesture_state, interaction_state)
+            self._draw_debug_hud(
+                composited,
+                hand_state,
+                gesture_state,
+                interaction_state,
+                system_state or SystemControlState(),
+                app_mode,
+            )
 
         return composited
 
@@ -244,6 +260,8 @@ class Renderer:
         frame: Any,
         gesture_state: GestureState,
         interaction_state: InteractionState,
+        system_state: SystemControlState,
+        app_mode: AppMode,
     ) -> None:
         chip_width = 248
         chip_height = 92
@@ -268,24 +286,28 @@ class Renderer:
             self._cv2.LINE_AA,
         )
 
-        if interaction_state.grabbed_window_id is not None:
-            status = f"Dragging {interaction_state.grabbed_window_id}"
-            status_color = self.theme.panel_grabbed_border
-        elif interaction_state.hovered_window_id is not None:
-            status = f"Hovering {interaction_state.hovered_window_id}"
-            status_color = self.theme.panel_hover_border
-        elif gesture_state.tracking_stable:
-            status = "Hand tracked"
-            status_color = self.theme.cursor
+        if app_mode is AppMode.SYSTEM_SHADOW:
+            title = "System Shadow"
+            helper = "Point to move, pinch to press"
+            status = system_state.effect_label
+            status_color = self._color_for_system_phase(system_state)
         else:
-            status = "Show one hand to begin"
-            status_color = self.theme.text
+            title = "Prototype"
+            helper = "Point to hover, pinch to drag"
+            if interaction_state.grabbed_window_id is not None:
+                status = f"Dragging {interaction_state.grabbed_window_id}"
+                status_color = self.theme.panel_grabbed_border
+            elif interaction_state.hovered_window_id is not None:
+                status = f"Hovering {interaction_state.hovered_window_id}"
+                status_color = self.theme.panel_hover_border
+            elif gesture_state.tracking_stable:
+                status = "Hand tracked"
+                status_color = self.theme.cursor
+            else:
+                status = "Show one hand to begin"
+                status_color = self.theme.text
 
-        lines = [
-            "Point to hover",
-            "Pinch to grab and drag",
-            status,
-        ]
+        lines = [title, helper, status]
 
         for index, line in enumerate(lines):
             color = status_color if index == len(lines) - 1 else self.theme.text
@@ -294,7 +316,7 @@ class Renderer:
                 line,
                 (chip_x + 14, chip_y + 26 + (index * 24)),
                 self._cv2.FONT_HERSHEY_SIMPLEX,
-                0.56,
+                0.54 if index < 2 else 0.5,
                 color,
                 2 if index == len(lines) - 1 else 1,
                 self._cv2.LINE_AA,
@@ -306,6 +328,8 @@ class Renderer:
         hand_state: HandState,
         gesture_state: GestureState,
         interaction_state: InteractionState,
+        system_state: SystemControlState,
+        app_mode: AppMode,
     ) -> None:
         font_scale = 0.46
         thickness = 1
@@ -314,6 +338,7 @@ class Renderer:
         padding_y = 12
         title = "Debug HUD"
         lines = [
+            f"Mode: {app_mode.value}",
             f"Hand: {'detected' if hand_state.detected else 'missing'}",
             f"Conf: {hand_state.confidence:.2f}",
             f"Track: {'stable' if gesture_state.tracking_stable else 'lost'}",
@@ -321,6 +346,10 @@ class Renderer:
             f"Hover: {interaction_state.hovered_window_id or '-'}",
             f"Grab: {interaction_state.grabbed_window_id or '-'}",
         ]
+
+        if system_state.enabled:
+            lines.append(f"System: {system_state.phase.value}")
+            lines.append(f"Backend: {system_state.backend_name}")
 
         if gesture_state.cursor_px is not None:
             lines.append(f"Cursor: {gesture_state.cursor_px[0]}, {gesture_state.cursor_px[1]}")
@@ -399,6 +428,15 @@ class Renderer:
             self._cv2.LINE_AA,
         )
         self._cv2.addWeighted(overlay, alpha, frame, 1.0 - alpha, 0.0, frame)
+
+    def _color_for_system_phase(self, system_state: SystemControlState) -> tuple[int, int, int]:
+        if system_state.phase.value in {"press", "drag"}:
+            return self.theme.panel_grabbed_border
+        if system_state.phase.value == "move":
+            return self.theme.cursor
+        if system_state.phase.value == "release":
+            return self.theme.panel_hover_border
+        return self.theme.text
 
     def _wrap_block(
         self,

@@ -14,6 +14,7 @@ This repository now has the initial project scaffold plus the first two runtime 
 6. A styled in-app virtual window now renders with idle and hover states driven by cursor hit-testing
 7. Pinch-to-grab now moves the virtual window with preserved grab offset and releases it cleanly in place
 8. The in-app prototype now supports multiple overlapping panels with frontmost selection and z-order updates while dragging
+9. A first system-control architecture now exists behind `--mode system-shadow`, translating gestures into backend-agnostic pointer intents without touching the real OS yet
 
 At this point the in-app interaction prototype is functionally complete. The remaining work is polish, tuning, and any future system-integration layer.
 
@@ -92,6 +93,7 @@ pytest
 python -m airdesk.main
 python -m airdesk.main --hide-debug-hud
 python -m airdesk.main --camera-index 1
+python -m airdesk.main --mode system-shadow
 ```
 
 ## System Overview
