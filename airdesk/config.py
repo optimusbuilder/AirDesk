@@ -67,6 +67,7 @@ class SystemControlConfig:
     start_armed: bool = False
     clutch_activation_ms: int = 180
     pinch_press_delay_ms: int = 60
+    tap_click_max_movement_px: int = 18
     cursor_edge_padding: float = 0.08
     cursor_sensitivity: float = 1.18
     cursor_deadzone_px: int = 6

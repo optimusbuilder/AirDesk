@@ -71,6 +71,8 @@ class ShadowSystemBackend(SystemBackend):
             return state.effect_label
 
         x, y = state.frame_cursor_px
+        if state.phase is PointerPhase.CLICK:
+            return f"Shadow click at {x}, {y}"
         if state.phase is PointerPhase.PRESS:
             return f"Shadow press at {x}, {y}"
         if state.phase is PointerPhase.DRAG:
@@ -93,6 +95,8 @@ class ShadowSystemBackend(SystemBackend):
         )
         if state.phase is PointerPhase.PRESS:
             return f"Shadow would grab the focused window for {action_label}"
+        if state.phase is PointerPhase.CLICK:
+            return "Shadow would ignore a quick tap in window mode"
         if state.phase is PointerPhase.DRAG:
             if self.window_action_mode is WindowActionMode.RESIZE:
                 return "Shadow would resize the focused window"

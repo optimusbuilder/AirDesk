@@ -21,6 +21,7 @@ class SystemIntentController:
     clutch_engaged: bool = False
     clutch_candidate_since: float | None = None
     pinch_candidate_since: float | None = None
+    pinch_candidate_cursor: PixelPoint | None = None
     previous_output_cursor: NormalizedPoint | None = None
     time_fn: Callable[[], float] = time.monotonic
 
@@ -30,6 +31,7 @@ class SystemIntentController:
         self.clutch_engaged = False
         self.clutch_candidate_since = None
         self.pinch_candidate_since = None
+        self.pinch_candidate_cursor = None
         self.previous_output_cursor = None
 
     def update(
@@ -70,6 +72,7 @@ class SystemIntentController:
         if not gesture_state.clutch_pose:
             self.clutch_candidate_since = None
             self.pinch_candidate_since = None
+            self.pinch_candidate_cursor = None
             if self.previous_button_down:
                 self.previous_button_down = False
                 self.clutch_engaged = False
@@ -120,6 +123,7 @@ class SystemIntentController:
 
             self.clutch_engaged = True
             self.pinch_candidate_since = None
+            self.pinch_candidate_cursor = None
 
         self.clutch_candidate_since = now
 
@@ -127,6 +131,7 @@ class SystemIntentController:
             if self.previous_button_down:
                 self.previous_button_down = False
                 self.pinch_candidate_since = None
+                self.pinch_candidate_cursor = None
                 self.previous_output_cursor = tuned_cursor
                 return SystemControlState(
                     enabled=True,
@@ -139,7 +144,23 @@ class SystemIntentController:
                     clutch_engaged=True,
                     effect_label="Would release the primary button",
                 )
+            if self._is_tap_click(cursor, now):
+                self.pinch_candidate_since = None
+                self.pinch_candidate_cursor = None
+                self.previous_output_cursor = tuned_cursor
+                return SystemControlState(
+                    enabled=True,
+                    armed=True,
+                    phase=PointerPhase.CLICK,
+                    frame_cursor_px=cursor,
+                    normalized_cursor=tuned_cursor,
+                    button_down=False,
+                    clutch_pose=True,
+                    clutch_engaged=True,
+                    effect_label="Would click the primary button",
+                )
             self.pinch_candidate_since = None
+            self.pinch_candidate_cursor = None
             self.previous_output_cursor = tuned_cursor
             return SystemControlState(
                 enabled=True,
@@ -156,6 +177,7 @@ class SystemIntentController:
         if gesture_state.pinch_active and not self.previous_button_down:
             if self.pinch_candidate_since is None:
                 self.pinch_candidate_since = now
+                self.pinch_candidate_cursor = cursor
             elapsed_ms = int((now - self.pinch_candidate_since) * 1000)
             if elapsed_ms < self.config.pinch_press_delay_ms:
                 self.previous_output_cursor = tuned_cursor
@@ -168,11 +190,12 @@ class SystemIntentController:
                     button_down=False,
                     clutch_pose=True,
                     clutch_engaged=True,
-                    effect_label="Hold the pinch briefly to click",
+                    effect_label="Tap to click, hold the pinch to drag",
                 )
 
             self.previous_button_down = True
             self.pinch_candidate_since = None
+            self.pinch_candidate_cursor = None
             self.previous_output_cursor = tuned_cursor
             return SystemControlState(
                 enabled=True,
@@ -203,6 +226,7 @@ class SystemIntentController:
 
         self.previous_button_down = False
         self.pinch_candidate_since = None
+        self.pinch_candidate_cursor = None
         self.previous_output_cursor = tuned_cursor
         return SystemControlState(
             enabled=True,
@@ -215,6 +239,21 @@ class SystemIntentController:
             clutch_engaged=True,
             effect_label="Would move the system pointer",
         )
+
+    def _is_tap_click(self, cursor: PixelPoint | None, now: float) -> bool:
+        if (
+            cursor is None
+            or self.pinch_candidate_since is None
+            or self.pinch_candidate_cursor is None
+        ):
+            return False
+
+        elapsed_ms = (now - self.pinch_candidate_since) * 1000.0
+        if elapsed_ms >= self.config.pinch_press_delay_ms:
+            return False
+
+        movement_px = math.dist(cursor, self.pinch_candidate_cursor)
+        return movement_px <= max(self.config.tap_click_max_movement_px, 0)
 
     @staticmethod
     def _active_cursor(gesture_state: GestureState) -> PixelPoint | None:

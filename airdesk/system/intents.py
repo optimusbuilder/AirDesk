@@ -29,6 +29,7 @@ class PointerPhase(StrEnum):
 
     IDLE = "idle"
     MOVE = "move"
+    CLICK = "click"
     PRESS = "press"
     DRAG = "drag"
     RELEASE = "release"

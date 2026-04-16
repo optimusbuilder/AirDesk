@@ -481,6 +481,13 @@ class MacOSSystemBackend(SystemBackend):
         if state.phase is PointerPhase.IDLE:
             return state
 
+        if state.phase is PointerPhase.CLICK and screen_point is not None:
+            self.bridge.post_primary_down(screen_point)
+            self.bridge.post_primary_up(screen_point)
+            self._button_down = False
+            state.effect_label = self._describe("click", screen_point)
+            return state
+
         if state.phase is PointerPhase.PRESS and screen_point is not None:
             self.bridge.post_primary_down(screen_point)
             self._button_down = True
@@ -604,6 +611,12 @@ class MacOSSystemBackend(SystemBackend):
             return state
         if state.phase is PointerPhase.MOVE:
             state.effect_label = self._window_ready_label(state)
+            return state
+        if state.phase is PointerPhase.CLICK:
+            if state.target_locked and state.target_label is not None:
+                state.effect_label = f'Quick tap ignored while "{state.target_label}" is locked'
+            else:
+                state.effect_label = "Quick tap ignored in window mode"
             return state
         if state.phase is PointerPhase.PRESS:
             return self._begin_window_action(state, screen_point)

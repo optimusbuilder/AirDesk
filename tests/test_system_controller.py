@@ -83,13 +83,59 @@ def test_system_controller_emits_move_press_drag_release_flow() -> None:
     assert move.normalized_cursor is not None
     assert move.button_down is False
     assert debounce.phase is PointerPhase.MOVE
-    assert "Hold the pinch briefly" in debounce.effect_label
+    assert "Tap to click, hold the pinch to drag" in debounce.effect_label
     assert press.phase is PointerPhase.PRESS
     assert press.button_down is True
     assert drag.phase is PointerPhase.DRAG
     assert drag.button_down is True
     assert release.phase is PointerPhase.RELEASE
     assert release.button_down is False
+
+
+def test_system_controller_emits_click_for_a_quick_pinch_tap() -> None:
+    """A short thumb-index tap should become a click instead of a drag."""
+    times = iter([100.0, 100.25, 100.28, 100.31])
+    controller = SystemIntentController(
+        config=SystemControlConfig(clutch_activation_ms=180, pinch_press_delay_ms=60),
+        enabled=True,
+        time_fn=lambda: next(times),
+    )
+
+    controller.update(
+        GestureState(cursor_px=(180, 140), tracking_stable=True, clutch_pose=True),
+        640,
+        480,
+    )
+    controller.update(
+        GestureState(cursor_px=(180, 140), tracking_stable=True, clutch_pose=True),
+        640,
+        480,
+    )
+    controller.update(
+        GestureState(
+            cursor_px=(180, 140),
+            tracking_stable=True,
+            clutch_pose=True,
+            pinch_started=True,
+            pinch_active=True,
+        ),
+        640,
+        480,
+    )
+    click = controller.update(
+        GestureState(
+            cursor_px=(182, 141),
+            tracking_stable=True,
+            clutch_pose=True,
+            pinch_ended=True,
+        ),
+        640,
+        480,
+    )
+
+    assert click.phase is PointerPhase.CLICK
+    assert click.button_down is False
+    assert "click" in click.effect_label.lower()
 
 
 def test_tracking_loss_forces_release_when_button_was_down() -> None:
@@ -410,6 +456,65 @@ def test_macos_backend_moves_after_clutch_is_engaged() -> None:
     assert state.backend_name == "macos"
     assert "Live macOS move" in state.effect_label
     assert bridge.calls == [("move", (721, 451))]
+
+
+def test_macos_backend_turns_a_quick_tap_into_a_click() -> None:
+    """A short pinch tap should post a primary down/up pair in pointer mode."""
+    bridge = FakeMacOSBridge()
+    backend = MacOSSystemBackend(bridge=bridge)
+    times = iter([100.0, 100.25, 100.28, 100.31])
+    controller = SystemIntentController(
+        config=SystemControlConfig(clutch_activation_ms=180, pinch_press_delay_ms=60),
+        enabled=True,
+        time_fn=lambda: next(times),
+    )
+
+    controller.update(
+        GestureState(cursor_px=(320, 240), tracking_stable=True, clutch_pose=True),
+        640,
+        480,
+    )
+    backend.apply(
+        controller.update(
+            GestureState(cursor_px=(320, 240), tracking_stable=True, clutch_pose=True),
+            640,
+            480,
+        )
+    )
+    backend.apply(
+        controller.update(
+            GestureState(
+                cursor_px=(320, 240),
+                tracking_stable=True,
+                clutch_pose=True,
+                pinch_started=True,
+                pinch_active=True,
+            ),
+            640,
+            480,
+        )
+    )
+    clicked = backend.apply(
+        controller.update(
+            GestureState(
+                cursor_px=(321, 241),
+                tracking_stable=True,
+                clutch_pose=True,
+                pinch_ended=True,
+            ),
+            640,
+            480,
+        )
+    )
+
+    assert clicked.phase is PointerPhase.CLICK
+    assert clicked.effect_label == "Live macOS click at 721, 451"
+    assert bridge.calls == [
+        ("move", (721, 451)),
+        ("move", (721, 451)),
+        ("down", (721, 451)),
+        ("up", (721, 451)),
+    ]
 
 
 def test_macos_backend_requires_accessibility_permission() -> None:

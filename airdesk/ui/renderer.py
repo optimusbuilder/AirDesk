@@ -451,7 +451,7 @@ class Renderer:
         self._cv2.addWeighted(overlay, alpha, frame, 1.0 - alpha, 0.0, frame)
 
     def _color_for_system_phase(self, system_state: SystemControlState) -> tuple[int, int, int]:
-        if system_state.phase.value in {"press", "drag"}:
+        if system_state.phase.value in {"click", "press", "drag"}:
             return self.theme.panel_grabbed_border
         if system_state.phase.value == "move":
             return self.theme.cursor
@@ -468,7 +468,7 @@ class Renderer:
             if window_action_mode is WindowActionMode.RESIZE:
                 return "Pinch to resize | R: move | C: lock"
             return "Pinch to move | R: resize | C: lock"
-        return "Open palm to steer, pinch to click"
+        return "Tap thumb + index to click | Hold to drag"
 
     def _wrap_block(
         self,
