@@ -22,6 +22,9 @@ class SystemIntentController:
     clutch_candidate_since: float | None = None
     pinch_candidate_since: float | None = None
     pinch_candidate_cursor: PixelPoint | None = None
+    last_click_at: float | None = None
+    last_click_cursor: PixelPoint | None = None
+    last_click_output_cursor: NormalizedPoint | None = None
     previous_output_cursor: NormalizedPoint | None = None
     time_fn: Callable[[], float] = time.monotonic
 
@@ -32,6 +35,9 @@ class SystemIntentController:
         self.clutch_candidate_since = None
         self.pinch_candidate_since = None
         self.pinch_candidate_cursor = None
+        self.last_click_at = None
+        self.last_click_cursor = None
+        self.last_click_output_cursor = None
         self.previous_output_cursor = None
 
     def update(
@@ -73,6 +79,7 @@ class SystemIntentController:
             self.clutch_candidate_since = None
             self.pinch_candidate_since = None
             self.pinch_candidate_cursor = None
+            self._clear_last_click()
             if self.previous_button_down:
                 self.previous_button_down = False
                 self.clutch_engaged = False
@@ -139,40 +146,48 @@ class SystemIntentController:
                     phase=PointerPhase.RELEASE,
                     frame_cursor_px=cursor,
                     normalized_cursor=tuned_cursor,
+                    click_count=0,
                     button_down=False,
                     clutch_pose=True,
                     clutch_engaged=True,
                     effect_label="Would release the primary button",
                 )
             if self._is_tap_click(cursor, now):
+                click_cursor, click_count = self._resolve_click_output(cursor, tuned_cursor, now)
                 self.pinch_candidate_since = None
                 self.pinch_candidate_cursor = None
-                self.previous_output_cursor = tuned_cursor
+                self.previous_output_cursor = click_cursor
                 return SystemControlState(
                     enabled=True,
                     armed=True,
                     phase=PointerPhase.CLICK,
                     frame_cursor_px=cursor,
-                    normalized_cursor=tuned_cursor,
+                    normalized_cursor=click_cursor,
+                    click_count=click_count,
                     button_down=False,
                     clutch_pose=True,
                     clutch_engaged=True,
-                    effect_label="Would click the primary button",
+                    effect_label=(
+                        "Would double-click the primary button"
+                        if click_count == 2
+                        else "Would click the primary button"
+                    ),
                 )
             self.pinch_candidate_since = None
             self.pinch_candidate_cursor = None
             self.previous_output_cursor = tuned_cursor
             return SystemControlState(
-                enabled=True,
-                armed=True,
-                phase=PointerPhase.MOVE,
-                frame_cursor_px=cursor,
-                normalized_cursor=tuned_cursor,
-                button_down=False,
-                clutch_pose=True,
-                clutch_engaged=True,
-                effect_label="Clutch engaged - steer with your hand",
-            )
+                    enabled=True,
+                    armed=True,
+                    phase=PointerPhase.MOVE,
+                    frame_cursor_px=cursor,
+                    normalized_cursor=tuned_cursor,
+                    click_count=0,
+                    button_down=False,
+                    clutch_pose=True,
+                    clutch_engaged=True,
+                    effect_label="Clutch engaged - steer with your hand",
+                )
 
         if gesture_state.pinch_active and not self.previous_button_down:
             if self.pinch_candidate_since is None:
@@ -187,6 +202,7 @@ class SystemIntentController:
                     phase=PointerPhase.MOVE,
                     frame_cursor_px=cursor,
                     normalized_cursor=tuned_cursor,
+                    click_count=0,
                     button_down=False,
                     clutch_pose=True,
                     clutch_engaged=True,
@@ -196,6 +212,7 @@ class SystemIntentController:
             self.previous_button_down = True
             self.pinch_candidate_since = None
             self.pinch_candidate_cursor = None
+            self._clear_last_click()
             self.previous_output_cursor = tuned_cursor
             return SystemControlState(
                 enabled=True,
@@ -203,6 +220,7 @@ class SystemIntentController:
                 phase=PointerPhase.PRESS,
                 frame_cursor_px=cursor,
                 normalized_cursor=tuned_cursor,
+                click_count=0,
                 button_down=True,
                 clutch_pose=True,
                 clutch_engaged=True,
@@ -218,6 +236,7 @@ class SystemIntentController:
                 phase=PointerPhase.DRAG,
                 frame_cursor_px=cursor,
                 normalized_cursor=tuned_cursor,
+                click_count=0,
                 button_down=True,
                 clutch_pose=True,
                 clutch_engaged=True,
@@ -234,6 +253,7 @@ class SystemIntentController:
             phase=PointerPhase.MOVE,
             frame_cursor_px=cursor,
             normalized_cursor=tuned_cursor,
+            click_count=0,
             button_down=False,
             clutch_pose=True,
             clutch_engaged=True,
@@ -254,6 +274,42 @@ class SystemIntentController:
 
         movement_px = math.dist(cursor, self.pinch_candidate_cursor)
         return movement_px <= max(self.config.tap_click_max_movement_px, 0)
+
+    def _resolve_click_output(
+        self,
+        cursor: PixelPoint,
+        tuned_cursor: NormalizedPoint | None,
+        now: float,
+    ) -> tuple[NormalizedPoint | None, int]:
+        if self._is_double_click(cursor, now):
+            anchored_cursor = self.last_click_output_cursor or tuned_cursor
+            self._clear_last_click()
+            return anchored_cursor, 2
+
+        self.last_click_at = now
+        self.last_click_cursor = cursor
+        self.last_click_output_cursor = tuned_cursor
+        return tuned_cursor, 1
+
+    def _is_double_click(self, cursor: PixelPoint, now: float) -> bool:
+        if (
+            self.last_click_at is None
+            or self.last_click_cursor is None
+            or self.last_click_output_cursor is None
+        ):
+            return False
+
+        elapsed_ms = (now - self.last_click_at) * 1000.0
+        if elapsed_ms > self.config.double_click_window_ms:
+            return False
+
+        movement_px = math.dist(cursor, self.last_click_cursor)
+        return movement_px <= max(self.config.double_click_max_movement_px, 0)
+
+    def _clear_last_click(self) -> None:
+        self.last_click_at = None
+        self.last_click_cursor = None
+        self.last_click_output_cursor = None
 
     @staticmethod
     def _active_cursor(gesture_state: GestureState) -> PixelPoint | None:

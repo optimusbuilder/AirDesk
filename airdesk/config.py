@@ -68,6 +68,8 @@ class SystemControlConfig:
     clutch_activation_ms: int = 180
     pinch_press_delay_ms: int = 60
     tap_click_max_movement_px: int = 18
+    double_click_window_ms: int = 320
+    double_click_max_movement_px: int = 24
     cursor_edge_padding: float = 0.08
     cursor_sensitivity: float = 1.18
     cursor_deadzone_px: int = 6

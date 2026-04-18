@@ -72,6 +72,8 @@ class ShadowSystemBackend(SystemBackend):
 
         x, y = state.frame_cursor_px
         if state.phase is PointerPhase.CLICK:
+            if state.click_count == 2:
+                return f"Shadow double-click at {x}, {y}"
             return f"Shadow click at {x}, {y}"
         if state.phase is PointerPhase.PRESS:
             return f"Shadow press at {x}, {y}"
@@ -96,6 +98,8 @@ class ShadowSystemBackend(SystemBackend):
         if state.phase is PointerPhase.PRESS:
             return f"Shadow would grab the focused window for {action_label}"
         if state.phase is PointerPhase.CLICK:
+            if state.click_count == 2:
+                return "Shadow would ignore a quick double tap in window mode"
             return "Shadow would ignore a quick tap in window mode"
         if state.phase is PointerPhase.DRAG:
             if self.window_action_mode is WindowActionMode.RESIZE:

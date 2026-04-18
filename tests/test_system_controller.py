@@ -134,8 +134,83 @@ def test_system_controller_emits_click_for_a_quick_pinch_tap() -> None:
     )
 
     assert click.phase is PointerPhase.CLICK
+    assert click.click_count == 1
     assert click.button_down is False
     assert "click" in click.effect_label.lower()
+
+
+def test_system_controller_emits_double_click_for_two_quick_taps() -> None:
+    """Two quick taps close together should promote the second click to double-click."""
+    times = iter([100.0, 100.25, 100.28, 100.31, 100.40, 100.45])
+    controller = SystemIntentController(
+        config=SystemControlConfig(
+            clutch_activation_ms=180,
+            pinch_press_delay_ms=60,
+            double_click_window_ms=320,
+        ),
+        enabled=True,
+        time_fn=lambda: next(times),
+    )
+
+    controller.update(
+        GestureState(cursor_px=(180, 140), tracking_stable=True, clutch_pose=True),
+        640,
+        480,
+    )
+    controller.update(
+        GestureState(cursor_px=(180, 140), tracking_stable=True, clutch_pose=True),
+        640,
+        480,
+    )
+    controller.update(
+        GestureState(
+            cursor_px=(180, 140),
+            tracking_stable=True,
+            clutch_pose=True,
+            pinch_started=True,
+            pinch_active=True,
+        ),
+        640,
+        480,
+    )
+    first_click = controller.update(
+        GestureState(
+            cursor_px=(182, 141),
+            tracking_stable=True,
+            clutch_pose=True,
+            pinch_ended=True,
+        ),
+        640,
+        480,
+    )
+    controller.update(
+        GestureState(
+            cursor_px=(186, 143),
+            tracking_stable=True,
+            clutch_pose=True,
+            pinch_started=True,
+            pinch_active=True,
+        ),
+        640,
+        480,
+    )
+    second_click = controller.update(
+        GestureState(
+            cursor_px=(188, 144),
+            tracking_stable=True,
+            clutch_pose=True,
+            pinch_ended=True,
+        ),
+        640,
+        480,
+    )
+
+    assert first_click.phase is PointerPhase.CLICK
+    assert first_click.click_count == 1
+    assert second_click.phase is PointerPhase.CLICK
+    assert second_click.click_count == 2
+    assert "double-click" in second_click.effect_label.lower()
+    assert second_click.normalized_cursor == first_click.normalized_cursor
 
 
 def test_tracking_loss_forces_release_when_button_was_down() -> None:
@@ -309,7 +384,8 @@ class FakeMacOSBridge:
                 position_settable=window_position_settable,
                 size_settable=window_size_settable,
             )
-        self.calls: list[tuple[str, tuple[float, float]]] = []
+        self.calls: list[tuple[object, ...]] = []
+        self.clicks: list[tuple[tuple[float, float], int]] = []
 
     def accessibility_is_trusted(self) -> bool:
         return self._trusted
@@ -328,6 +404,10 @@ class FakeMacOSBridge:
 
     def post_primary_up(self, point: tuple[float, float]) -> None:
         self.calls.append(("up", point))
+
+    def post_primary_click(self, point: tuple[float, float], click_count: int = 1) -> None:
+        self.clicks.append((point, click_count))
+        self.calls.append(("click", point, click_count))
 
     def copy_focused_window(self) -> object | None:
         return self._focused_window_ref
@@ -508,13 +588,94 @@ def test_macos_backend_turns_a_quick_tap_into_a_click() -> None:
     )
 
     assert clicked.phase is PointerPhase.CLICK
+    assert clicked.click_count == 1
     assert clicked.effect_label == "Live macOS click at 721, 451"
-    assert bridge.calls == [
-        ("move", (721, 451)),
-        ("move", (721, 451)),
-        ("down", (721, 451)),
-        ("up", (721, 451)),
-    ]
+    assert bridge.calls == [("move", (721, 451)), ("move", (721, 451)), ("click", (721, 451), 1)]
+    assert bridge.clicks == [((721, 451), 1)]
+
+
+def test_macos_backend_promotes_second_tap_to_double_click() -> None:
+    """The second qualifying tap should reuse the first click point and click-state 2."""
+    bridge = FakeMacOSBridge()
+    backend = MacOSSystemBackend(bridge=bridge)
+    times = iter([100.0, 100.25, 100.28, 100.31, 100.40, 100.45])
+    controller = SystemIntentController(
+        config=SystemControlConfig(
+            clutch_activation_ms=180,
+            pinch_press_delay_ms=60,
+            double_click_window_ms=320,
+        ),
+        enabled=True,
+        time_fn=lambda: next(times),
+    )
+
+    controller.update(
+        GestureState(cursor_px=(320, 240), tracking_stable=True, clutch_pose=True),
+        640,
+        480,
+    )
+    backend.apply(
+        controller.update(
+            GestureState(cursor_px=(320, 240), tracking_stable=True, clutch_pose=True),
+            640,
+            480,
+        )
+    )
+    backend.apply(
+        controller.update(
+            GestureState(
+                cursor_px=(320, 240),
+                tracking_stable=True,
+                clutch_pose=True,
+                pinch_started=True,
+                pinch_active=True,
+            ),
+            640,
+            480,
+        )
+    )
+    backend.apply(
+        controller.update(
+            GestureState(
+                cursor_px=(321, 241),
+                tracking_stable=True,
+                clutch_pose=True,
+                pinch_ended=True,
+            ),
+            640,
+            480,
+        )
+    )
+    backend.apply(
+        controller.update(
+            GestureState(
+                cursor_px=(326, 244),
+                tracking_stable=True,
+                clutch_pose=True,
+                pinch_started=True,
+                pinch_active=True,
+            ),
+            640,
+            480,
+        )
+    )
+    double_clicked = backend.apply(
+        controller.update(
+            GestureState(
+                cursor_px=(328, 245),
+                tracking_stable=True,
+                clutch_pose=True,
+                pinch_ended=True,
+            ),
+            640,
+            480,
+        )
+    )
+
+    assert double_clicked.phase is PointerPhase.CLICK
+    assert double_clicked.click_count == 2
+    assert double_clicked.effect_label == "Live macOS double-click at 721, 451"
+    assert bridge.clicks == [((721, 451), 1), ((721, 451), 2)]
 
 
 def test_macos_backend_requires_accessibility_permission() -> None:

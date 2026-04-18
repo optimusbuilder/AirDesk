@@ -48,6 +48,7 @@ class SystemControlState:
     phase: PointerPhase = PointerPhase.IDLE
     frame_cursor_px: PixelPoint | None = None
     normalized_cursor: NormalizedPoint | None = None
+    click_count: int = 0
     button_down: bool = False
     clutch_pose: bool = False
     clutch_engaged: bool = False

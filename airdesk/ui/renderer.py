@@ -366,6 +366,8 @@ class Renderer:
             lines.append(f"Clutch: {'engaged' if system_state.clutch_engaged else 'idle'}")
             lines.append(f"Locked: {'yes' if system_state.target_locked else 'no'}")
             lines.append(f"System: {system_state.phase.value}")
+            if system_state.click_count > 0:
+                lines.append(f"Clicks: {system_state.click_count}")
             lines.append(f"Backend: {system_state.backend_name}")
             if system_state.permission_granted is not None:
                 lines.append(f"Trust: {'yes' if system_state.permission_granted else 'no'}")
@@ -468,7 +470,7 @@ class Renderer:
             if window_action_mode is WindowActionMode.RESIZE:
                 return "Pinch to resize | R: move | C: lock"
             return "Pinch to move | R: resize | C: lock"
-        return "Tap thumb + index to click | Hold to drag"
+        return "Tap to click | Tap-tap to double-click | Hold to drag"
 
     def _wrap_block(
         self,

@@ -29,6 +29,7 @@ _KCG_EVENT_LEFT_MOUSE_UP = 2
 _KCG_EVENT_MOUSE_MOVED = 5
 _KCG_EVENT_LEFT_MOUSE_DRAGGED = 6
 _KCG_MOUSE_BUTTON_LEFT = 0
+_KCG_MOUSE_EVENT_CLICK_STATE = 1
 _KAX_VALUE_TYPE_CGPOINT = 1
 _KAX_VALUE_TYPE_CGSIZE = 2
 _KCF_STRING_ENCODING_UTF8 = 0x08000100
@@ -73,6 +74,8 @@ class CoreGraphicsBridge(Protocol):
     def post_primary_drag(self, point: ScreenPoint) -> None: ...
 
     def post_primary_up(self, point: ScreenPoint) -> None: ...
+
+    def post_primary_click(self, point: ScreenPoint, click_count: int = 1) -> None: ...
 
     def copy_focused_window(self) -> WindowRef | None: ...
 
@@ -139,6 +142,19 @@ class QuartzCoreGraphicsBridge:
     def post_primary_up(self, point: ScreenPoint) -> None:
         self._warp_cursor(point)
         self._post_mouse_event(_KCG_EVENT_LEFT_MOUSE_UP, point)
+
+    def post_primary_click(self, point: ScreenPoint, click_count: int = 1) -> None:
+        self._warp_cursor(point)
+        self._post_mouse_event(
+            _KCG_EVENT_LEFT_MOUSE_DOWN,
+            point,
+            click_count=max(click_count, 1),
+        )
+        self._post_mouse_event(
+            _KCG_EVENT_LEFT_MOUSE_UP,
+            point,
+            click_count=max(click_count, 1),
+        )
 
     def copy_focused_window(self) -> WindowRef | None:
         focused_app = self._copy_attribute_value(
@@ -325,6 +341,13 @@ class QuartzCoreGraphicsBridge:
         self._application_services.CGEventPost.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
         self._application_services.CGEventPost.restype = None
 
+        self._application_services.CGEventSetIntegerValueField.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_int64,
+        ]
+        self._application_services.CGEventSetIntegerValueField.restype = None
+
         self._core_foundation.CFRelease.argtypes = [ctypes.c_void_p]
         self._core_foundation.CFRelease.restype = None
 
@@ -357,7 +380,12 @@ class QuartzCoreGraphicsBridge:
         if error_code != 0:
             raise RuntimeError(f"CGWarpMouseCursorPosition failed with code {error_code}")
 
-    def _post_mouse_event(self, mouse_type: int, point: ScreenPoint) -> None:
+    def _post_mouse_event(
+        self,
+        mouse_type: int,
+        point: ScreenPoint,
+        click_count: int = 1,
+    ) -> None:
         event = self._application_services.CGEventCreateMouseEvent(
             None,
             mouse_type,
@@ -368,6 +396,11 @@ class QuartzCoreGraphicsBridge:
             raise RuntimeError("CGEventCreateMouseEvent returned null")
 
         try:
+            self._application_services.CGEventSetIntegerValueField(
+                event,
+                _KCG_MOUSE_EVENT_CLICK_STATE,
+                click_count,
+            )
             self._application_services.CGEventPost(_KCG_HID_EVENT_TAP, event)
         finally:
             self._core_foundation.CFRelease(event)
@@ -482,10 +515,11 @@ class MacOSSystemBackend(SystemBackend):
             return state
 
         if state.phase is PointerPhase.CLICK and screen_point is not None:
-            self.bridge.post_primary_down(screen_point)
-            self.bridge.post_primary_up(screen_point)
+            click_count = max(state.click_count, 1)
+            self.bridge.post_primary_click(screen_point, click_count=click_count)
             self._button_down = False
-            state.effect_label = self._describe("click", screen_point)
+            action_label = "double-click" if click_count == 2 else "click"
+            state.effect_label = self._describe(action_label, screen_point)
             return state
 
         if state.phase is PointerPhase.PRESS and screen_point is not None:
@@ -613,10 +647,14 @@ class MacOSSystemBackend(SystemBackend):
             state.effect_label = self._window_ready_label(state)
             return state
         if state.phase is PointerPhase.CLICK:
-            if state.target_locked and state.target_label is not None:
-                state.effect_label = f'Quick tap ignored while "{state.target_label}" is locked'
+            if state.click_count == 2:
+                ignored_label = "Quick double tap ignored"
             else:
-                state.effect_label = "Quick tap ignored in window mode"
+                ignored_label = "Quick tap ignored"
+            if state.target_locked and state.target_label is not None:
+                state.effect_label = f'{ignored_label} while "{state.target_label}" is locked'
+            else:
+                state.effect_label = f"{ignored_label} in window mode"
             return state
         if state.phase is PointerPhase.PRESS:
             return self._begin_window_action(state, screen_point)
