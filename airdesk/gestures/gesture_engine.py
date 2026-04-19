@@ -1,10 +1,12 @@
 """Gesture interpretation from tracked hand landmarks."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
+import time
+from typing import Callable
 
 from airdesk.config import GestureConfig
-from airdesk.gestures.filters import ema_point
+from airdesk.gestures.filters import OneEuroFilter
 from airdesk.models.gesture import GestureState
 from airdesk.models.hand import HandState, PixelPoint
 
@@ -22,25 +24,26 @@ class GestureEngine:
     """Converts hand landmarks into higher-level gesture signals."""
 
     config: GestureConfig
-    previous_cursor: PixelPoint | None = None
+    _cursor_filter: OneEuroFilter | None = field(default=None, init=False)
     previous_pinch_active: bool = False
+    _pending_pinch_state: bool = False
+    _pinch_state_since: float | None = field(default=None, init=False)
+    _time_fn: Callable[[], float] = field(default=time.monotonic)
 
     def update(self, hand_state: HandState) -> GestureState:
         """Derive gesture state from the tracked hand."""
         raw_cursor = hand_state.index_tip
         if not hand_state.detected or raw_cursor is None:
-            self.previous_cursor = None
+            self._reset_cursor_filter()
             self.previous_pinch_active = False
+            self._pending_pinch_state = False
+            self._pinch_state_since = None
             return GestureState(tracking_stable=False)
 
-        cursor = ema_point(
-            current=raw_cursor,
-            previous=self.previous_cursor,
-            alpha=self.config.cursor_smoothing_alpha,
-        )
-        self.previous_cursor = cursor
+        cursor = self._smooth_cursor(raw_cursor)
         pinch_ratio = self._compute_pinch_ratio(hand_state)
-        pinch_active = self._compute_pinch_active(pinch_ratio)
+        raw_pinch = self._compute_raw_pinch_active(pinch_ratio)
+        pinch_active = self._debounce_pinch(raw_pinch)
         pinch_started = pinch_active and not self.previous_pinch_active
         pinch_ended = self.previous_pinch_active and not pinch_active
         self.previous_pinch_active = pinch_active
@@ -56,6 +59,22 @@ class GestureEngine:
             tracking_stable=True,
         )
 
+    def _smooth_cursor(self, raw_cursor: PixelPoint) -> PixelPoint:
+        """Apply the 1€ adaptive filter to the raw cursor position."""
+        if self._cursor_filter is None:
+            self._cursor_filter = OneEuroFilter(
+                min_cutoff=self.config.cursor_filter_min_cutoff,
+                beta=self.config.cursor_filter_beta,
+                d_cutoff=self.config.cursor_filter_d_cutoff,
+                time_fn=self._time_fn,
+            )
+        return self._cursor_filter.apply(raw_cursor)
+
+    def _reset_cursor_filter(self) -> None:
+        """Reset the cursor filter so the next detection starts fresh."""
+        if self._cursor_filter is not None:
+            self._cursor_filter.reset()
+
     def _compute_pinch_ratio(self, hand_state: HandState) -> float:
         if hand_state.thumb_tip is None or hand_state.index_tip is None:
             return math.inf
@@ -63,10 +82,39 @@ class GestureEngine:
         hand_scale = max(hand_state.hand_scale, 1.0)
         return math.dist(hand_state.thumb_tip, hand_state.index_tip) / hand_scale
 
-    def _compute_pinch_active(self, pinch_ratio: float) -> bool:
+    def _compute_raw_pinch_active(self, pinch_ratio: float) -> bool:
+        """Apply hysteresis thresholds to determine raw pinch state."""
         if self.previous_pinch_active:
             return pinch_ratio <= self.config.pinch_off_threshold
         return pinch_ratio <= self.config.pinch_on_threshold
+
+    def _debounce_pinch(self, raw_pinch: bool) -> bool:
+        """Require the raw pinch state to remain stable for a debounce window.
+
+        This prevents rapid on-off-on flicker that hysteresis alone cannot
+        catch, especially during quick hand movements near the threshold.
+        """
+        now = self._time_fn()
+
+        # If the raw signal matches the current committed state, reset debounce.
+        if raw_pinch == self.previous_pinch_active:
+            self._pending_pinch_state = raw_pinch
+            self._pinch_state_since = None
+            return self.previous_pinch_active
+
+        # The raw signal disagrees — start or continue the debounce timer.
+        if self._pinch_state_since is None or self._pending_pinch_state != raw_pinch:
+            self._pinch_state_since = now
+            self._pending_pinch_state = raw_pinch
+
+        elapsed_ms = (now - self._pinch_state_since) * 1000.0
+        if elapsed_ms >= self.config.pinch_debounce_ms:
+            # Debounce window satisfied: commit the new state.
+            self._pinch_state_since = None
+            return raw_pinch
+
+        # Still within the debounce window: hold the previous state.
+        return self.previous_pinch_active
 
     @staticmethod
     def _compute_clutch_pose(hand_state: HandState) -> bool:

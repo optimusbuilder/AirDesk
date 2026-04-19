@@ -43,8 +43,12 @@ class GestureConfig:
     """Gesture detection and smoothing settings."""
 
     cursor_smoothing_alpha: float = 0.40
+    cursor_filter_min_cutoff: float = 1.0
+    cursor_filter_beta: float = 0.007
+    cursor_filter_d_cutoff: float = 1.0
     pinch_on_threshold: float = 0.30
     pinch_off_threshold: float = 0.40
+    pinch_debounce_ms: int = 40
     hand_loss_timeout_ms: int = 150
 
 
@@ -66,10 +70,10 @@ class SystemControlConfig:
     enable_live_backend: bool = False
     start_armed: bool = False
     clutch_activation_ms: int = 180
-    pinch_press_delay_ms: int = 60
-    tap_click_max_movement_px: int = 18
-    double_click_window_ms: int = 320
-    double_click_max_movement_px: int = 24
+    pinch_press_delay_ms: int = 200
+    tap_click_max_movement_px: int = 32
+    double_click_window_ms: int = 450
+    double_click_max_movement_px: int = 40
     cursor_edge_padding: float = 0.08
     cursor_sensitivity: float = 1.18
     cursor_deadzone_px: int = 6

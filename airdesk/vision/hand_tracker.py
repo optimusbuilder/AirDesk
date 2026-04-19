@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from airdesk.config import TrackingConfig
+from airdesk.gestures.filters import ema_scalar
 from airdesk.models.hand import HandState
 
 
@@ -21,6 +22,8 @@ class HandTracker:
         self._hand_landmark = self._load_hand_landmark_enum()
         self._landmarker = self._create_landmarker()
         self._last_timestamp_ms = 0
+        self._previous_hand_scale: float | None = None
+        self._HAND_SCALE_ALPHA = 0.35
 
     def detect(self, frame: Any) -> HandState:
         """Detect a single hand and return structured state."""
@@ -172,9 +175,31 @@ class HandTracker:
         )
 
     def _compute_hand_scale(self, landmarks_px: dict[int, tuple[int, int]]) -> float:
+        """Compute a rotation-resilient hand scale from multiple metrics.
+
+        Uses the maximum of three distances:
+        1. INDEX_MCP → PINKY_MCP  (palm width — shrinks on yaw)
+        2. WRIST → MIDDLE_MCP     (palm length — shrinks on pitch)
+        3. WRIST → INDEX_MCP      (diagonal — partially resilient to both)
+
+        The max keeps the scale stable even when one axis collapses due to
+        hand rotation relative to the camera.
+        """
         index_mcp = landmarks_px[int(self._hand_landmark.INDEX_FINGER_MCP)]
         pinky_mcp = landmarks_px[int(self._hand_landmark.PINKY_MCP)]
-        return max(math.dist(index_mcp, pinky_mcp), 1.0)
+        middle_mcp = landmarks_px[int(self._hand_landmark.MIDDLE_FINGER_MCP)]
+        wrist = landmarks_px[int(self._hand_landmark.WRIST)]
+
+        palm_width = math.dist(index_mcp, pinky_mcp)
+        palm_length = math.dist(wrist, middle_mcp)
+        wrist_diagonal = math.dist(wrist, index_mcp)
+
+        raw_scale = max(palm_width, palm_length, wrist_diagonal, 1.0)
+
+        # EMA smooth the scale to prevent sudden jumps between frames.
+        smoothed = ema_scalar(raw_scale, self._previous_hand_scale, self._HAND_SCALE_ALPHA)
+        self._previous_hand_scale = smoothed
+        return smoothed
 
     @staticmethod
     def _clamp(value: int, upper: int) -> int:

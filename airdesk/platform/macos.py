@@ -727,7 +727,14 @@ class MacOSSystemBackend(SystemBackend):
             round(self._active_window_origin[0] + delta_x),
             round(self._active_window_origin[1] + delta_y),
         )
-        self.bridge.move_window_to(self._locked_window_ref, target_origin)
+        try:
+            self.bridge.move_window_to(self._locked_window_ref, target_origin)
+        except RuntimeError:
+            state.effect_label = (
+                f'Lost access to "{self._locked_window_title or "Focused window"}"'
+            )
+            self._clear_window_drag_state()
+            return state
         state.target_label = self._locked_window_title
         state.target_locked = self._locked_window_ref is not None
         snap_candidate = self._snap_candidate_for_point(screen_point)
@@ -755,7 +762,7 @@ class MacOSSystemBackend(SystemBackend):
             return state
         if not self.bridge.is_window_size_settable(self._locked_window_ref):
             state.effect_label = (
-                f'"{self._locked_window_title or "Focused window"}" cannot be resized through Accessibility'
+                f'"{ self._locked_window_title or "Focused window"}" cannot be resized through Accessibility'
             )
             self._clear_window_drag_state()
             return state
@@ -768,8 +775,15 @@ class MacOSSystemBackend(SystemBackend):
             delta_y,
             self._resize_anchor,
         )
-        self.bridge.move_window_to(self._locked_window_ref, (resized_bounds[0], resized_bounds[1]))
-        self.bridge.resize_window_to(self._locked_window_ref, (resized_bounds[2], resized_bounds[3]))
+        try:
+            self.bridge.move_window_to(self._locked_window_ref, (resized_bounds[0], resized_bounds[1]))
+            self.bridge.resize_window_to(self._locked_window_ref, (resized_bounds[2], resized_bounds[3]))
+        except RuntimeError:
+            state.effect_label = (
+                f'Lost access to "{self._locked_window_title or "Focused window"}" during resize'
+            )
+            self._clear_window_drag_state()
+            return state
         state.target_label = self._locked_window_title
         state.target_locked = self._locked_window_ref is not None
         state.effect_label = (
@@ -792,8 +806,17 @@ class MacOSSystemBackend(SystemBackend):
             snap_candidate = self._snap_candidate_for_point(screen_point)
             if snap_candidate is not None and self.bridge.is_window_size_settable(self._locked_window_ref):
                 snap_label, snap_origin, snap_size = snap_candidate
-                self.bridge.move_window_to(self._locked_window_ref, snap_origin)
-                self.bridge.resize_window_to(self._locked_window_ref, snap_size)
+                try:
+                    self.bridge.move_window_to(self._locked_window_ref, snap_origin)
+                    self.bridge.resize_window_to(self._locked_window_ref, snap_size)
+                except RuntimeError:
+                    self._clear_window_drag_state()
+                    state.target_label = target_label
+                    state.target_locked = self._locked_window_ref is not None
+                    state.effect_label = (
+                        f'Lost access to "{target_label or "Focused window"}" during snap'
+                    )
+                    return state
                 self._clear_window_drag_state()
                 state.target_label = target_label
                 state.target_locked = self._locked_window_ref is not None
