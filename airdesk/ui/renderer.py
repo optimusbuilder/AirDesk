@@ -48,6 +48,8 @@ class Renderer:
         self._update_click_ripple(resolved_system_state)
         composited = frame.copy()
         self._draw_windows(composited, windows)
+        if resolved_system_state.trackpad_bounds is not None:
+            self._draw_mini_trackpad(composited, resolved_system_state.trackpad_bounds, resolved_system_state.clutch_engaged)
         self._draw_cursor(composited, gesture_state)
         self._draw_dwell_ring(composited, gesture_state, resolved_system_state)
         self._draw_click_ripple(composited)
@@ -87,6 +89,57 @@ class Renderer:
             self._draw_window_fill(frame, window)
             self._draw_window_border(frame, window)
             self._draw_window_text(frame, window)
+
+    def _draw_mini_trackpad(
+        self,
+        frame: Any,
+        bounds: tuple[int, int, int, int],
+        is_engaged: bool,
+    ) -> None:
+        x_min, y_min, x_max, y_max = bounds
+        width = x_max - x_min
+        height = y_max - y_min
+        
+        if is_engaged:
+            fill_color = self.theme.panel_hover_border
+            border_color = self.theme.cursor
+            alpha = 0.35
+        else:
+            fill_color = self.theme.panel_fill
+            border_color = self.theme.panel_border
+            alpha = 0.45
+            
+        self._draw_translucent_rect(
+            frame,
+            x=x_min,
+            y=y_min,
+            width=width,
+            height=height,
+            color=fill_color,
+            alpha=alpha,
+        )
+        
+        thickness = 2 if is_engaged else 1
+        self._cv2.rectangle(
+            frame,
+            (x_min, y_min),
+            (x_max, y_max),
+            border_color,
+            thickness,
+            self._cv2.LINE_AA,
+        )
+        
+        label = "Virtual Trackpad"
+        self._cv2.putText(
+            frame,
+            label,
+            (x_min + 12, y_max - 12),
+            self._cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            border_color,
+            1,
+            self._cv2.LINE_AA,
+        )
 
     def _draw_hand_landmarks(self, frame: Any, hand_state: HandState) -> None:
         if not hand_state.detected:

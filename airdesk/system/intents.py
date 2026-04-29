@@ -57,3 +57,4 @@ class SystemControlState:
     target_locked: bool = False
     effect_label: str = "System control disabled"
     dwell_progress: float = 0.0
+    trackpad_bounds: tuple[int, int, int, int] | None = None

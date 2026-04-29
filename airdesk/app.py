@@ -7,7 +7,7 @@ from airdesk.core.interaction_controller import InteractionController
 from airdesk.core.window_manager import WindowManager
 from airdesk.gestures.gesture_engine import GestureEngine
 from airdesk.models.interaction import InteractionState
-from airdesk.models.window import VirtualWindow
+from airdesk.models.window import VirtualWindow, WindowState
 from airdesk.platform.base import SystemBackend
 from airdesk.platform.macos import MacOSSystemBackend
 from airdesk.platform.shadow import ShadowSystemBackend
@@ -40,7 +40,6 @@ class AirDeskApp:
 
         camera_stream = CameraStream(self.config.camera)
         hand_tracker: HandTracker | None = None
-        renderer = Renderer(config=self.config.render)
         gesture_engine = GestureEngine(config=self.config.gestures)
         interaction_controller = InteractionController(config=self.config.gestures)
         system_controller = SystemIntentController(config=self.config.system)
@@ -62,6 +61,17 @@ class AirDeskApp:
         interaction_state = InteractionState()
         window_manager = WindowManager()
 
+        # Determine whether to use overlay mode (no camera preview)
+        use_overlay = self.config.system.mode in (
+            AppMode.SYSTEM_SHADOW,
+            AppMode.SYSTEM_MACOS,
+        )
+
+        overlay = None
+        renderer = None
+        if not use_overlay:
+            renderer = Renderer(config=self.config.render)
+
         print(self._startup_message(system_armed))
 
         try:
@@ -69,12 +79,29 @@ class AirDeskApp:
         except RuntimeError as exc:
             print(f"AirDesk could not start: {exc}")
             camera_stream.close()
+            if overlay is not None:
+                overlay.close()
             return 1
 
         return_code = 0
         try:
-            cv2.namedWindow(self.window_title, cv2.WINDOW_NORMAL)
+            if not use_overlay:
+                cv2.namedWindow(self.window_title, cv2.WINDOW_NORMAL)
+
             hand_tracker = HandTracker(self.config.tracking)
+
+            # Create overlay AFTER MediaPipe/OpenCV have initialized their
+            # GPU contexts — otherwise NSApplication conflicts cause aborts.
+            if use_overlay and overlay is None:
+                try:
+                    from airdesk.platform.overlay import OverlayWindow
+                    screen_w, screen_h = self._get_screen_dimensions(system_backend)
+                    overlay = OverlayWindow(screen_w, screen_h)
+                except Exception as exc:
+                    print(f"Overlay unavailable ({exc}), falling back to camera preview.")
+                    use_overlay = False
+                    renderer = Renderer(config=self.config.render)
+                    cv2.namedWindow(self.window_title, cv2.WINDOW_NORMAL)
             while True:
                 frame = camera_stream.read()
                 hand_state = hand_tracker.detect(frame.image)
@@ -102,36 +129,29 @@ class AirDeskApp:
                     system_window_action_mode,
                 )
 
-                display_frame = renderer.render(
-                    frame.image,
-                    hand_state,
-                    gesture_state,
-                    window_manager.ordered_windows(),
-                    interaction_state,
-                    system_state=system_state,
-                    app_mode=self.config.system.mode,
-                )
-                footer_text = self._footer_text(system_armed)
-                (footer_width, _), _ = cv2.getTextSize(
-                    footer_text,
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    1,
-                )
-                footer_x = max(frame.width - footer_width - 18, 18)
-                cv2.putText(
-                    display_frame,
-                    footer_text,
-                    (footer_x, frame.height - 18),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (255, 255, 255),
-                    1,
-                    cv2.LINE_AA,
-                )
-                cv2.imshow(self.window_title, display_frame)
-
-                key = cv2.waitKey(1) & 0xFF
+                if use_overlay and overlay is not None:
+                    overlay.update(system_state)
+                    # In overlay mode, use a very short cv2.waitKey on a
+                    # dummy window just for key capture.  If the window
+                    # doesn't exist yet, create a tiny one.
+                    try:
+                        key = cv2.waitKey(1) & 0xFF
+                    except cv2.error:
+                        key = 0xFF
+                elif renderer is not None:
+                    display_frame = renderer.render(
+                        frame.image,
+                        hand_state,
+                        gesture_state,
+                        window_manager.ordered_windows(),
+                        interaction_state,
+                        system_state=system_state,
+                        app_mode=self.config.system.mode,
+                    )
+                    cv2.imshow(self.window_title, display_frame)
+                    key = cv2.waitKey(1) & 0xFF
+                else:
+                    key = 0xFF
                 if key in (27, ord("q")):
                     break
                 if key in (ord("s"), ord("S")) and self.config.system.mode is AppMode.SYSTEM_MACOS:
@@ -162,6 +182,8 @@ class AirDeskApp:
             print(f"AirDesk stopped unexpectedly: {exc}")
             return_code = 1
         finally:
+            if overlay is not None:
+                overlay.close()
             if system_backend is not None:
                 system_backend.reset()
             if hand_tracker is not None:
@@ -174,6 +196,26 @@ class AirDeskApp:
             print("AirDesk shutdown complete.")
 
         return return_code
+
+    @staticmethod
+    def _get_screen_dimensions(system_backend: SystemBackend | None) -> tuple[int, int]:
+        """Detect the main display dimensions."""
+        if isinstance(system_backend, MacOSSystemBackend) and system_backend.bridge is not None:
+            bounds = system_backend.bridge.main_display_bounds()
+            return int(bounds[2]), int(bounds[3])
+        # Fallback: query CoreGraphics directly
+        try:
+            import ctypes
+            cg = ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+            cg.CGMainDisplayID.restype = ctypes.c_uint32
+            cg.CGDisplayPixelsWide.restype = ctypes.c_size_t
+            cg.CGDisplayPixelsWide.argtypes = [ctypes.c_uint32]
+            cg.CGDisplayPixelsHigh.restype = ctypes.c_size_t
+            cg.CGDisplayPixelsHigh.argtypes = [ctypes.c_uint32]
+            display_id = cg.CGMainDisplayID()
+            return int(cg.CGDisplayPixelsWide(display_id)), int(cg.CGDisplayPixelsHigh(display_id))
+        except Exception:
+            return 1440, 900
 
     def _build_system_backend(self) -> SystemBackend | None:
         """Create the backend needed for the selected runtime mode."""

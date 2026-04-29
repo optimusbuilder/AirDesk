@@ -69,20 +69,18 @@ class SystemControlConfig:
     mode: AppMode = AppMode.PROTOTYPE
     enable_live_backend: bool = False
     start_armed: bool = False
-    clutch_activation_ms: int = 180
-    clutch_grace_ms: int = 150
+    trackpad_width: int = 340
+    trackpad_height: int = 200
+    trackpad_bottom_offset: int = 20
     pinch_press_delay_ms: int = 200
-    tap_click_max_movement_px: int = 32
-    double_click_window_ms: int = 450
-    double_click_max_movement_px: int = 40
-    cursor_edge_padding: float = 0.08
-    cursor_sensitivity: float = 1.18
-    cursor_deadzone_px: int = 6
+    cursor_deadzone_px: int = 4
     dwell_click_enabled: bool = True
     dwell_radius_px: int = 14
     dwell_single_ms: int = 800
     dwell_double_ms: int = 1800
     dwell_cooldown_ms: int = 600
+    overlay_trackpad_width: int = 420
+    overlay_trackpad_height: int = 280
 
 
 @dataclass(frozen=True, slots=True)
