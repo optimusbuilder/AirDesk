@@ -83,7 +83,7 @@ def test_system_controller_emits_move_press_drag_release_flow() -> None:
     assert move.normalized_cursor is not None
     assert move.button_down is False
     assert debounce.phase is PointerPhase.MOVE
-    assert "Tap to click, hold the pinch to drag" in debounce.effect_label
+    assert "Release to click, hold to drag" in debounce.effect_label
     assert press.phase is PointerPhase.PRESS
     assert press.button_down is True
     assert drag.phase is PointerPhase.DRAG
@@ -211,6 +211,278 @@ def test_system_controller_emits_double_click_for_two_quick_taps() -> None:
     assert second_click.click_count == 2
     assert "double-click" in second_click.effect_label.lower()
     assert second_click.normalized_cursor == first_click.normalized_cursor
+
+
+def test_middle_finger_pinch_produces_double_click() -> None:
+    """A single middle-finger tap should produce a double-click immediately."""
+    times = iter([100.0, 100.25, 100.28, 100.31])
+    controller = SystemIntentController(
+        config=SystemControlConfig(clutch_activation_ms=180, pinch_press_delay_ms=200),
+        enabled=True,
+        time_fn=lambda: next(times),
+    )
+
+    # Engage clutch.
+    controller.update(
+        GestureState(cursor_px=(180, 140), tracking_stable=True, clutch_pose=True),
+        640,
+        480,
+    )
+    controller.update(
+        GestureState(cursor_px=(180, 140), tracking_stable=True, clutch_pose=True),
+        640,
+        480,
+    )
+
+    # Middle-finger pinch start.
+    controller.update(
+        GestureState(
+            cursor_px=(180, 140),
+            tracking_stable=True,
+            clutch_pose=True,
+            pinch_started=True,
+            pinch_active=True,
+            pinch_finger="middle",
+        ),
+        640,
+        480,
+    )
+
+    # Release — should produce a double-click in a single tap.
+    click = controller.update(
+        GestureState(
+            cursor_px=(182, 141),
+            tracking_stable=True,
+            clutch_pose=True,
+            pinch_ended=True,
+            pinch_finger="middle",
+        ),
+        640,
+        480,
+    )
+
+    assert click.phase is PointerPhase.CLICK
+    assert click.click_count == 2
+    assert "double-click" in click.effect_label.lower()
+
+
+def test_clutch_grace_period_bridges_debounce_gap() -> None:
+    """Clutch must survive when clutch_pose drops before pinch_active fires.
+
+    In practice, the user's fingers start curling (clutch_pose=False) before
+    the 40ms pinch debounce commits (pinch_active still False).  Without the
+    grace period, this gap kills the clutch and no click can ever fire.
+    """
+    times = iter([
+        100.0,    # 0: clutch candidate start
+        100.25,   # 1: clutch engaged (>180ms)
+        100.285,  # 2: fingers curling — clutch_pose=False, pinch still False (debounce gap!)
+        100.30,   # 3: debounce commits — pinch_started=True, clutch_pose still False
+        100.34,   # 4: pinch ended — should be a CLICK
+    ])
+    controller = SystemIntentController(
+        config=SystemControlConfig(
+            clutch_activation_ms=180,
+            clutch_grace_ms=150,
+            pinch_press_delay_ms=200,
+        ),
+        enabled=True,
+        time_fn=lambda: next(times),
+    )
+
+    # Engage the clutch.
+    controller.update(
+        GestureState(cursor_px=(200, 200), tracking_stable=True, clutch_pose=True),
+        640, 480,
+    )
+    move = controller.update(
+        GestureState(cursor_px=(200, 200), tracking_stable=True, clutch_pose=True),
+        640, 480,
+    )
+    assert move.phase is PointerPhase.MOVE
+    assert move.clutch_engaged is True
+
+    # Frame 2: fingers curling — clutch_pose drops but pinch not yet committed.
+    # This is the debounce gap that previously killed the clutch.
+    gap = controller.update(
+        GestureState(
+            cursor_px=(200, 200),
+            tracking_stable=True,
+            clutch_pose=False,   # fingers curling
+            pinch_active=False,  # debounce hasn't committed yet
+        ),
+        640, 480,
+    )
+    # Grace period should keep the clutch alive!
+    assert gap.clutch_engaged is True, "Clutch should survive the debounce gap via grace period"
+
+    # Frame 3: debounce commits → pinch_started fires.
+    controller.update(
+        GestureState(
+            cursor_px=(200, 200),
+            tracking_stable=True,
+            clutch_pose=False,
+            pinch_started=True,
+            pinch_active=True,
+            pinch_finger="index",
+        ),
+        640, 480,
+    )
+
+    # Frame 4: quick release → should be a click.
+    click = controller.update(
+        GestureState(
+            cursor_px=(202, 201),
+            tracking_stable=True,
+            clutch_pose=False,
+            pinch_ended=True,
+            pinch_finger="index",
+        ),
+        640, 480,
+    )
+
+    assert click.phase is PointerPhase.CLICK
+    assert click.click_count == 1
+
+
+def test_dwell_click_fires_single_click_after_stillness() -> None:
+    """Holding the cursor still for 800ms should fire a single-click."""
+    t = [0.0]
+    controller = SystemIntentController(
+        config=SystemControlConfig(
+            clutch_activation_ms=180,
+            dwell_click_enabled=True,
+            dwell_single_ms=800,
+            dwell_double_ms=1800,
+            dwell_radius_px=14,
+        ),
+        enabled=True,
+        time_fn=lambda: t[0],
+    )
+
+    # Engage clutch.
+    t[0] = 100.0
+    controller.update(
+        GestureState(cursor_px=(200, 200), tracking_stable=True, clutch_pose=True),
+        640, 480,
+    )
+    t[0] = 100.25
+    controller.update(
+        GestureState(cursor_px=(200, 200), tracking_stable=True, clutch_pose=True),
+        640, 480,
+    )
+
+    # Hold still — accumulate dwell time from when clutch engaged (100.25).
+    click_state = None
+    for ms in range(300, 1500, 33):
+        t[0] = 100.0 + ms / 1000
+        state = controller.update(
+            GestureState(cursor_px=(201, 200), tracking_stable=True, clutch_pose=True),
+            640, 480,
+        )
+        if state.phase is PointerPhase.CLICK:
+            click_state = state
+            break
+
+    # By ~1.1s the single click (800ms from anchor at 100.25) should have fired.
+    assert click_state is not None, "Dwell single-click never fired"
+    assert click_state.click_count == 1
+    assert "dwell" in click_state.effect_label.lower()
+
+
+def test_dwell_click_fires_double_click_for_continued_stillness() -> None:
+    """Continuing to hold still past 1800ms should fire a double-click."""
+    t = [0.0]
+    controller = SystemIntentController(
+        config=SystemControlConfig(
+            clutch_activation_ms=180,
+            dwell_click_enabled=True,
+            dwell_single_ms=800,
+            dwell_double_ms=1800,
+            dwell_radius_px=14,
+        ),
+        enabled=True,
+        time_fn=lambda: t[0],
+    )
+
+    # Engage clutch.
+    t[0] = 100.0
+    controller.update(
+        GestureState(cursor_px=(200, 200), tracking_stable=True, clutch_pose=True),
+        640, 480,
+    )
+    t[0] = 100.25
+    controller.update(
+        GestureState(cursor_px=(200, 200), tracking_stable=True, clutch_pose=True),
+        640, 480,
+    )
+
+    # Advance through single-click and well into double-click territory.
+    double_state = None
+    for ms in range(300, 3000, 33):
+        t[0] = 100.0 + ms / 1000
+        state = controller.update(
+            GestureState(cursor_px=(201, 200), tracking_stable=True, clutch_pose=True),
+            640, 480,
+        )
+        if state.phase is PointerPhase.CLICK and state.click_count == 2:
+            double_state = state
+            break
+
+    assert double_state is not None, "Dwell double-click never fired"
+    assert double_state.click_count == 2
+    assert "double" in double_state.effect_label.lower()
+
+
+def test_dwell_click_resets_on_cursor_movement() -> None:
+    """Moving the cursor beyond the radius should reset the dwell timer."""
+    t = [0.0]
+    controller = SystemIntentController(
+        config=SystemControlConfig(
+            clutch_activation_ms=180,
+            dwell_click_enabled=True,
+            dwell_single_ms=800,
+            dwell_double_ms=1800,
+            dwell_radius_px=14,
+        ),
+        enabled=True,
+        time_fn=lambda: t[0],
+    )
+
+    # Engage clutch.
+    t[0] = 100.0
+    controller.update(
+        GestureState(cursor_px=(200, 200), tracking_stable=True, clutch_pose=True),
+        640, 480,
+    )
+    t[0] = 100.25
+    controller.update(
+        GestureState(cursor_px=(200, 200), tracking_stable=True, clutch_pose=True),
+        640, 480,
+    )
+
+    # Hold for 700ms (close to threshold).
+    for ms in range(300, 700, 33):
+        t[0] = 100.0 + ms / 1000
+        controller.update(
+            GestureState(cursor_px=(201, 200), tracking_stable=True, clutch_pose=True),
+            640, 480,
+        )
+
+    # Move cursor far (>14px) — should reset the dwell.
+    t[0] = 100.75
+    controller.update(
+        GestureState(cursor_px=(250, 200), tracking_stable=True, clutch_pose=True),
+        640, 480,
+    )
+
+    # Now wait another 400ms — should NOT fire because the timer reset.
+    t[0] = 101.15
+    state = controller.update(
+        GestureState(cursor_px=(250, 200), tracking_stable=True, clutch_pose=True),
+        640, 480,
+    )
+    assert state.phase is PointerPhase.MOVE
 
 
 def test_tracking_loss_forces_release_when_button_was_down() -> None:

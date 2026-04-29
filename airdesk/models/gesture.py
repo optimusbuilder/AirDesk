@@ -15,5 +15,6 @@ class GestureState:
     pinch_active: bool = False
     pinch_started: bool = False
     pinch_ended: bool = False
+    pinch_finger: str | None = None  # "index" or "middle"
     clutch_pose: bool = False
     tracking_stable: bool = False

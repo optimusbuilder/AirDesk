@@ -242,3 +242,86 @@ def test_curled_fingers_keep_clutch_pose_false() -> None:
     )
 
     assert state.clutch_pose is False
+
+
+def test_index_pinch_reports_index_finger() -> None:
+    """Pinching thumb+index should set pinch_finger to 'index'."""
+    engine, advance = _make_engine(pinch_debounce_ms=0)
+
+    # Thumb at (140,100), index at (100,100) → distance 40.
+    # Middle finger far away at (100, 30) → distance much larger.
+    advance(0.033)
+    state = engine.update(
+        make_hand_state(
+            index_tip=(100, 100),
+            thumb_tip=(125, 100),
+            hand_scale=100.0,
+            landmarks_px={12: (100, 30)},  # Middle finger tip far away
+        )
+    )
+
+    assert state.pinch_active is True
+    assert state.pinch_finger == "index"
+
+
+def test_middle_pinch_reports_middle_finger() -> None:
+    """Pinching thumb+middle should set pinch_finger to 'middle'."""
+    engine, advance = _make_engine(pinch_debounce_ms=0)
+
+    # Index tip far away, but middle finger tip (landmark 12) close to thumb.
+    advance(0.033)
+    state = engine.update(
+        make_hand_state(
+            index_tip=(100, 100),
+            thumb_tip=(140, 100),
+            hand_scale=100.0,
+            landmarks_px={12: (125, 100)},  # Middle finger close to thumb
+        )
+    )
+
+    assert state.pinch_active is True
+    assert state.pinch_finger == "middle"
+
+
+def test_pinch_finger_persists_through_ended_frame() -> None:
+    """The finger identity should still be available on the pinch_ended frame."""
+    engine, advance = _make_engine(pinch_debounce_ms=0)
+
+    # Start a middle-finger pinch.
+    advance(0.033)
+    started = engine.update(
+        make_hand_state(
+            index_tip=(100, 100),
+            thumb_tip=(140, 100),
+            hand_scale=100.0,
+            landmarks_px={12: (125, 100)},
+        )
+    )
+    assert started.pinch_started is True
+    assert started.pinch_finger == "middle"
+
+    # Release — move both fingers far from thumb so pinch ends.
+    advance(0.033)
+    ended = engine.update(
+        make_hand_state(
+            index_tip=(100, 100),
+            thumb_tip=(200, 100),
+            hand_scale=100.0,
+            landmarks_px={12: (100, 30)},  # Middle finger far from thumb too
+        )
+    )
+    assert ended.pinch_ended is True
+    assert ended.pinch_finger == "middle"
+
+    # Idle frame — finger should be None.
+    advance(0.033)
+    idle = engine.update(
+        make_hand_state(
+            index_tip=(100, 100),
+            thumb_tip=(200, 100),
+            hand_scale=100.0,
+            landmarks_px={12: (100, 30)},
+        )
+    )
+    assert idle.pinch_active is False
+    assert idle.pinch_finger is None

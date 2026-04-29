@@ -20,12 +20,17 @@ class SystemIntentController:
     previous_button_down: bool = False
     clutch_engaged: bool = False
     clutch_candidate_since: float | None = None
+    _clutch_last_true_at: float | None = None
     pinch_candidate_since: float | None = None
     pinch_candidate_cursor: PixelPoint | None = None
     last_click_at: float | None = None
     last_click_cursor: PixelPoint | None = None
     last_click_output_cursor: NormalizedPoint | None = None
     previous_output_cursor: NormalizedPoint | None = None
+    _dwell_anchor: PixelPoint | None = None
+    _dwell_started_at: float | None = None
+    _dwell_single_fired: bool = False
+    _dwell_cooldown_until: float | None = None
     time_fn: Callable[[], float] = time.monotonic
 
     def reset(self) -> None:
@@ -33,12 +38,17 @@ class SystemIntentController:
         self.previous_button_down = False
         self.clutch_engaged = False
         self.clutch_candidate_since = None
+        self._clutch_last_true_at = None
         self.pinch_candidate_since = None
         self.pinch_candidate_cursor = None
         self.last_click_at = None
         self.last_click_cursor = None
         self.last_click_output_cursor = None
         self.previous_output_cursor = None
+        self._dwell_anchor = None
+        self._dwell_started_at = None
+        self._dwell_single_fired = False
+        self._dwell_cooldown_until = None
 
     def update(
         self,
@@ -75,40 +85,59 @@ class SystemIntentController:
                 effect_label="Show one open hand to engage control",
             )
 
-        if not gesture_state.clutch_pose:
-            self.clutch_candidate_since = None
-            self.pinch_candidate_since = None
-            self.pinch_candidate_cursor = None
-            self._clear_last_click()
-            if self.previous_button_down:
-                self.previous_button_down = False
+        if gesture_state.clutch_pose:
+            # Refresh the timestamp every frame the clutch pose is seen.
+            self._clutch_last_true_at = now
+        else:
+            # Clutch pose is False.  Keep the clutch alive for a grace
+            # period so the pinch debounce has time to commit before the
+            # clutch drops.  Without this, fast pinches would kill the
+            # clutch during the ~40 ms debounce window — before
+            # pinch_active is True — making clicks impossible.
+            pinch_holding = (
+                gesture_state.pinch_active
+                or gesture_state.pinch_started
+                or gesture_state.pinch_ended
+            )
+            grace_alive = (
+                self._clutch_last_true_at is not None
+                and (now - self._clutch_last_true_at) * 1000
+                    < self.config.clutch_grace_ms
+            )
+            if not (self.clutch_engaged and (pinch_holding or grace_alive)):
+                self.clutch_candidate_since = None
+                self.pinch_candidate_since = None
+                self._clutch_last_true_at = None
+                self._clear_last_click()
+                if self.previous_button_down:
+                    self.previous_button_down = False
+                    self.clutch_engaged = False
+                    self.previous_output_cursor = tuned_cursor
+                    return SystemControlState(
+                        enabled=True,
+                        armed=True,
+                        phase=PointerPhase.RELEASE,
+                        frame_cursor_px=cursor,
+                        normalized_cursor=tuned_cursor,
+                        button_down=False,
+                        clutch_pose=False,
+                        clutch_engaged=False,
+                        effect_label="Clutch released - would release the primary button",
+                    )
+
                 self.clutch_engaged = False
                 self.previous_output_cursor = tuned_cursor
                 return SystemControlState(
                     enabled=True,
                     armed=True,
-                    phase=PointerPhase.RELEASE,
+                    phase=PointerPhase.IDLE,
                     frame_cursor_px=cursor,
                     normalized_cursor=tuned_cursor,
                     button_down=False,
                     clutch_pose=False,
                     clutch_engaged=False,
-                    effect_label="Clutch released - would release the primary button",
+                    effect_label="Hold an open palm to engage control",
                 )
-
-            self.clutch_engaged = False
-            self.previous_output_cursor = tuned_cursor
-            return SystemControlState(
-                enabled=True,
-                armed=True,
-                phase=PointerPhase.IDLE,
-                frame_cursor_px=cursor,
-                normalized_cursor=tuned_cursor,
-                button_down=False,
-                clutch_pose=False,
-                clutch_engaged=False,
-                effect_label="Hold an open palm to engage control",
-            )
 
         if not self.clutch_engaged:
             if self.clutch_candidate_since is None:
@@ -153,7 +182,15 @@ class SystemIntentController:
                     effect_label="Would release the primary button",
                 )
             if self._is_tap_click(cursor, now):
-                click_cursor, click_count = self._resolve_click_output(cursor, tuned_cursor, now)
+                if gesture_state.pinch_finger == "middle":
+                    # Middle-finger pinch → instant double-click.
+                    click_cursor = tuned_cursor
+                    click_count = 2
+                    self._clear_last_click()
+                else:
+                    click_cursor, click_count = self._resolve_click_output(
+                        cursor, tuned_cursor, now,
+                    )
                 self.pinch_candidate_since = None
                 self.pinch_candidate_cursor = None
                 self.previous_output_cursor = click_cursor
@@ -190,6 +227,10 @@ class SystemIntentController:
                 )
 
         if gesture_state.pinch_active and not self.previous_button_down:
+            # Pinch started — cancel any in-progress dwell.
+            self._dwell_anchor = None
+            self._dwell_started_at = None
+            self._dwell_single_fired = False
             if self.pinch_candidate_since is None:
                 self.pinch_candidate_since = now
                 self.pinch_candidate_cursor = cursor
@@ -206,7 +247,11 @@ class SystemIntentController:
                     button_down=False,
                     clutch_pose=True,
                     clutch_engaged=True,
-                    effect_label="Tap to click, hold the pinch to drag",
+                    effect_label=(
+                        "Middle-finger tap → open file"
+                        if gesture_state.pinch_finger == "middle"
+                        else "Release to click, hold to drag"
+                    ),
                 )
 
             self.previous_button_down = True
@@ -247,6 +292,15 @@ class SystemIntentController:
         self.pinch_candidate_since = None
         self.pinch_candidate_cursor = None
         self.previous_output_cursor = tuned_cursor
+
+        # --- Dwell-click: hold the cursor still to click ---
+        dwell_result = self._check_dwell_click(cursor, tuned_cursor, now)
+        if dwell_result is not None:
+            return dwell_result
+
+        # Compute dwell progress for the visual ring.
+        dwell_progress = self._dwell_progress(now)
+
         return SystemControlState(
             enabled=True,
             armed=True,
@@ -257,7 +311,12 @@ class SystemIntentController:
             button_down=False,
             clutch_pose=True,
             clutch_engaged=True,
-            effect_label="Would move the system pointer",
+            dwell_progress=dwell_progress,
+            effect_label=(
+                f"Dwell {int(dwell_progress * 100)}%"
+                if dwell_progress > 0
+                else "Hold still to click"
+            ),
         )
 
     def _is_tap_click(self, cursor: PixelPoint | None, now: float) -> bool:
@@ -372,3 +431,98 @@ class SystemIntentController:
         sensitivity = max(self.config.cursor_sensitivity, 0.1)
         centered = (value - 0.5) * sensitivity
         return min(max(centered + 0.5, 0.0), 1.0)
+
+    # ---- Dwell-click ----
+
+    def _check_dwell_click(
+        self,
+        cursor: PixelPoint,
+        tuned_cursor: NormalizedPoint | None,
+        now: float,
+    ) -> SystemControlState | None:
+        """Check if the cursor has been still long enough to fire a click.
+
+        Returns a CLICK state if a dwell threshold is reached, or None to
+        let the caller emit a normal MOVE frame.
+        """
+        if not self.config.dwell_click_enabled:
+            return None
+
+        # Still in cooldown from a previous dwell-click?
+        if self._dwell_cooldown_until is not None:
+            if now < self._dwell_cooldown_until:
+                return None
+            self._dwell_cooldown_until = None
+
+        # Start a new dwell if there is no anchor.
+        if self._dwell_anchor is None:
+            self._dwell_anchor = cursor
+            self._dwell_started_at = now
+            self._dwell_single_fired = False
+            return None
+
+        # Check if cursor has drifted beyond the stillness radius.
+        drift = math.dist(cursor, self._dwell_anchor)
+        if drift > self.config.dwell_radius_px:
+            self._dwell_anchor = cursor
+            self._dwell_started_at = now
+            self._dwell_single_fired = False
+            return None
+
+        elapsed_ms = (now - self._dwell_started_at) * 1000.0
+
+        # Double-click threshold (fires second, takes priority).
+        if elapsed_ms >= self.config.dwell_double_ms:
+            self._reset_dwell(now)
+            self.previous_output_cursor = tuned_cursor
+            return SystemControlState(
+                enabled=True,
+                armed=True,
+                phase=PointerPhase.CLICK,
+                frame_cursor_px=cursor,
+                normalized_cursor=tuned_cursor,
+                click_count=2,
+                button_down=False,
+                clutch_pose=True,
+                clutch_engaged=True,
+                dwell_progress=1.0,
+                effect_label="Dwell double-click",
+            )
+
+        # Single-click threshold.
+        if elapsed_ms >= self.config.dwell_single_ms and not self._dwell_single_fired:
+            self._dwell_single_fired = True
+            self.previous_output_cursor = tuned_cursor
+            return SystemControlState(
+                enabled=True,
+                armed=True,
+                phase=PointerPhase.CLICK,
+                frame_cursor_px=cursor,
+                normalized_cursor=tuned_cursor,
+                click_count=1,
+                button_down=False,
+                clutch_pose=True,
+                clutch_engaged=True,
+                dwell_progress=self.config.dwell_single_ms / self.config.dwell_double_ms,
+                effect_label="Dwell click",
+            )
+
+        return None
+
+    def _dwell_progress(self, now: float) -> float:
+        """Return 0.0-1.0 indicating how far the current dwell has progressed."""
+        if (
+            not self.config.dwell_click_enabled
+            or self._dwell_started_at is None
+            or self._dwell_cooldown_until is not None
+        ):
+            return 0.0
+        elapsed_ms = (now - self._dwell_started_at) * 1000.0
+        return min(elapsed_ms / max(self.config.dwell_double_ms, 1), 1.0)
+
+    def _reset_dwell(self, now: float) -> None:
+        """Reset dwell state and start cooldown."""
+        self._dwell_anchor = None
+        self._dwell_started_at = None
+        self._dwell_single_fired = False
+        self._dwell_cooldown_until = now + self.config.dwell_cooldown_ms / 1000.0

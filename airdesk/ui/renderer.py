@@ -49,6 +49,7 @@ class Renderer:
         composited = frame.copy()
         self._draw_windows(composited, windows)
         self._draw_cursor(composited, gesture_state)
+        self._draw_dwell_ring(composited, gesture_state, resolved_system_state)
         self._draw_click_ripple(composited)
         self._draw_hand_landmarks(composited, hand_state)
         self._draw_status_chip(
@@ -169,6 +170,60 @@ class Renderer:
         if self._click_ripple_count >= 2:
             inner_radius = int(self.config.cursor_radius + progress * self._CLICK_RIPPLE_MAX_RADIUS * 0.55)
             self._cv2.circle(frame, self._click_ripple_center, inner_radius, color, thickness, self._cv2.LINE_AA)
+
+    def _draw_dwell_ring(
+        self,
+        frame: Any,
+        gesture_state: GestureState,
+        system_state: SystemControlState,
+    ) -> None:
+        """Draw a filling arc around the cursor showing dwell-click progress."""
+        progress = system_state.dwell_progress
+        cursor = gesture_state.cursor_px
+        if progress <= 0.0 or cursor is None or not gesture_state.tracking_stable:
+            return
+
+        ring_radius = self.config.cursor_radius + 10
+        thickness = 3
+
+        # Single-click threshold as a fraction of the full dwell time.
+        single_frac = 0.44  # ~800ms / 1800ms
+
+        # Color: green while in single-click zone, yellow-green in double zone.
+        if progress < single_frac:
+            color = (0, 220, 100)  # Bright green (BGR)
+        else:
+            color = (0, 255, 255)  # Yellow (BGR)
+
+        # Draw the filling arc (clockwise from top).
+        start_angle = -90
+        end_angle = int(-90 + progress * 360)
+        self._cv2.ellipse(
+            frame,
+            cursor,
+            (ring_radius, ring_radius),
+            0,
+            start_angle,
+            end_angle,
+            color,
+            thickness,
+            self._cv2.LINE_AA,
+        )
+
+        # Draw a faint background circle to show the full ring outline.
+        self._cv2.circle(frame, cursor, ring_radius, (80, 80, 80), 1, self._cv2.LINE_AA)
+
+        # Draw a notch mark at the single-click threshold.
+        notch_angle = math.radians(-90 + single_frac * 360)
+        notch_inner = (
+            int(cursor[0] + (ring_radius - 4) * math.cos(notch_angle)),
+            int(cursor[1] + (ring_radius - 4) * math.sin(notch_angle)),
+        )
+        notch_outer = (
+            int(cursor[0] + (ring_radius + 4) * math.cos(notch_angle)),
+            int(cursor[1] + (ring_radius + 4) * math.sin(notch_angle)),
+        )
+        self._cv2.line(frame, notch_inner, notch_outer, (200, 200, 200), 2, self._cv2.LINE_AA)
 
     def _draw_window_shadow(self, frame: Any, window: VirtualWindow) -> None:
         if window.state is WindowState.GRABBED:
@@ -411,7 +466,7 @@ class Renderer:
             f"Hand: {'detected' if hand_state.detected else 'missing'}",
             f"Conf: {hand_state.confidence:.2f}",
             f"Track: {'stable' if gesture_state.tracking_stable else 'lost'}",
-            f"Pinch: {'active' if gesture_state.pinch_active else 'idle'}",
+            f"Pinch: {'active (' + (gesture_state.pinch_finger or '?') + ')' if gesture_state.pinch_active else 'idle'}",
             f"Clutch pose: {'yes' if gesture_state.clutch_pose else 'no'}",
             f"Hover: {interaction_state.hovered_window_id or '-'}",
             f"Grab: {interaction_state.grabbed_window_id or '-'}",
@@ -543,7 +598,7 @@ class Renderer:
             if window_action_mode is WindowActionMode.RESIZE:
                 return "Pinch to resize | R: move | C: lock"
             return "Pinch to move | R: resize | C: lock"
-        return "Tap to click | Tap-tap to double-click | Hold to drag"
+        return "Hold still: click | Keep holding: open | Pinch: drag"
 
     def _wrap_block(
         self,

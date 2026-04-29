@@ -18,6 +18,8 @@ _CLUTCH_FINGER_PAIRS = (
     (17, 20),
 )
 
+_MIDDLE_FINGER_TIP_ID = 12
+
 
 @dataclass(slots=True)
 class GestureEngine:
@@ -28,6 +30,7 @@ class GestureEngine:
     previous_pinch_active: bool = False
     _pending_pinch_state: bool = False
     _pinch_state_since: float | None = field(default=None, init=False)
+    _active_pinch_finger: str | None = field(default=None, init=False)
     _time_fn: Callable[[], float] = field(default=time.monotonic)
 
     def update(self, hand_state: HandState) -> GestureState:
@@ -38,14 +41,26 @@ class GestureEngine:
             self.previous_pinch_active = False
             self._pending_pinch_state = False
             self._pinch_state_since = None
+            self._active_pinch_finger = None
             return GestureState(tracking_stable=False)
 
         cursor = self._smooth_cursor(raw_cursor)
-        pinch_ratio = self._compute_pinch_ratio(hand_state)
+        pinch_ratio, raw_finger = self._compute_pinch_info(hand_state)
         raw_pinch = self._compute_raw_pinch_active(pinch_ratio)
         pinch_active = self._debounce_pinch(raw_pinch)
         pinch_started = pinch_active and not self.previous_pinch_active
         pinch_ended = self.previous_pinch_active and not pinch_active
+
+        # Lock the finger identity at pinch start; keep it through the hold.
+        if pinch_started:
+            self._active_pinch_finger = raw_finger
+
+        # Report the finger on active and ended frames; clear after ended.
+        pinch_finger = self._active_pinch_finger if (pinch_active or pinch_ended) else None
+
+        if pinch_ended:
+            self._active_pinch_finger = None
+
         self.previous_pinch_active = pinch_active
 
         return GestureState(
@@ -55,6 +70,7 @@ class GestureEngine:
             pinch_active=pinch_active,
             pinch_started=pinch_started,
             pinch_ended=pinch_ended,
+            pinch_finger=pinch_finger,
             clutch_pose=self._compute_clutch_pose(hand_state),
             tracking_stable=True,
         )
@@ -75,12 +91,27 @@ class GestureEngine:
         if self._cursor_filter is not None:
             self._cursor_filter.reset()
 
-    def _compute_pinch_ratio(self, hand_state: HandState) -> float:
-        if hand_state.thumb_tip is None or hand_state.index_tip is None:
-            return math.inf
+    def _compute_pinch_info(self, hand_state: HandState) -> tuple[float, str]:
+        """Compute the pinch ratio and identify which finger is pinching.
 
+        Checks both thumb-index and thumb-middle distances. The finger
+        closest to the thumb determines the pinch type:
+        - "index" → single click in system mode
+        - "middle" → double click in system mode
+
+        Returns (pinch_ratio, finger_name).
+        """
+        thumb = hand_state.thumb_tip
+        index = hand_state.index_tip
+        middle = hand_state.landmarks_px.get(_MIDDLE_FINGER_TIP_ID)
         hand_scale = max(hand_state.hand_scale, 1.0)
-        return math.dist(hand_state.thumb_tip, hand_state.index_tip) / hand_scale
+
+        index_dist = math.dist(thumb, index) / hand_scale if thumb and index else math.inf
+        middle_dist = math.dist(thumb, middle) / hand_scale if thumb and middle else math.inf
+
+        if middle_dist < index_dist:
+            return middle_dist, "middle"
+        return index_dist, "index"
 
     def _compute_raw_pinch_active(self, pinch_ratio: float) -> bool:
         """Apply hysteresis thresholds to determine raw pinch state."""

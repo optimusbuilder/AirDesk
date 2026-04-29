@@ -56,3 +56,4 @@ class SystemControlState:
     target_label: str | None = None
     target_locked: bool = False
     effect_label: str = "System control disabled"
+    dwell_progress: float = 0.0
