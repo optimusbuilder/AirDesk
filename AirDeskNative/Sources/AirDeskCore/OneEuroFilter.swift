@@ -1,16 +1,16 @@
 import Foundation
 
 /// Simple first-order low-pass filter used internally by the 1€ filter.
-struct LowPassFilter {
+public struct LowPassFilter {
     private var y: Double = 0.0
     private var alpha: Double
     private var initialized: Bool = false
     
-    init(alpha: Double) {
+    public init(alpha: Double) {
         self.alpha = max(0.0, min(alpha, 1.0))
     }
     
-    mutating func apply(value: Double, alpha newAlpha: Double? = nil) -> Double {
+    public mutating func apply(value: Double, alpha newAlpha: Double? = nil) -> Double {
         if let newAlpha = newAlpha {
             self.alpha = max(0.0, min(newAlpha, 1.0))
         }
@@ -25,19 +25,19 @@ struct LowPassFilter {
         return self.y
     }
     
-    mutating func reset() {
+    public mutating func reset() {
         self.initialized = false
         self.y = 0.0
     }
     
-    var lastValue: Double { y }
+    public var lastValue: Double { y }
 }
 
 /// Adaptive low-pass filter for 2D cursor positions.
-struct OneEuroFilter {
-    var minCutoff: Double
-    var beta: Double
-    var dCutoff: Double
+public struct OneEuroFilter {
+    public var minCutoff: Double
+    public var beta: Double
+    public var dCutoff: Double
     
     private var xFilter = LowPassFilter(alpha: 1.0)
     private var yFilter = LowPassFilter(alpha: 1.0)
@@ -47,13 +47,13 @@ struct OneEuroFilter {
     private var lastTime: TimeInterval?
     private var initialized = false
     
-    init(minCutoff: Double = 1.0, beta: Double = 0.007, dCutoff: Double = 1.0) {
+    public init(minCutoff: Double = 1.0, beta: Double = 0.007, dCutoff: Double = 1.0) {
         self.minCutoff = minCutoff
         self.beta = beta
         self.dCutoff = dCutoff
     }
     
-    mutating func apply(point: NormalizedPoint, timestamp: TimeInterval = ProcessInfo.processInfo.systemUptime) -> NormalizedPoint {
+    public mutating func apply(point: NormalizedPoint, timestamp: TimeInterval = ProcessInfo.processInfo.systemUptime) -> NormalizedPoint {
         let x = point.x
         let y = point.y
         
@@ -96,7 +96,7 @@ struct OneEuroFilter {
         return NormalizedPoint(x: fx, y: fy)
     }
     
-    mutating func reset() {
+    public mutating func reset() {
         xFilter.reset()
         yFilter.reset()
         dxFilter.reset()

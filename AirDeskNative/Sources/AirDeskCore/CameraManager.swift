@@ -2,24 +2,24 @@ import AVFoundation
 import CoreMedia
 
 /// Delegate protocol to receive video frames.
-protocol CameraManagerDelegate: AnyObject {
+public protocol CameraManagerDelegate: AnyObject {
     func cameraManager(_ manager: CameraManager, didCapture buffer: CMSampleBuffer)
 }
 
 /// Manages the `AVCaptureSession` and camera feed.
-final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
+public final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
     
-    let captureSession = AVCaptureSession()
+    public let captureSession = AVCaptureSession()
     private let videoDataOutput = AVCaptureVideoDataOutput()
     private let captureQueue = DispatchQueue(label: "com.airdesk.captureQueue")
     
-    weak var delegate: CameraManagerDelegate?
+    public weak var delegate: CameraManagerDelegate?
     
-    override init() {
+    public override init() {
         super.init()
     }
     
-    func checkPermissionsAndStart() {
+    public func checkPermissionsAndStart() {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
             self.setupAndStartSession()
@@ -107,7 +107,7 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         }
     }
     
-    func stopSession() {
+    public func stopSession() {
         if captureSession.isRunning {
             captureSession.stopRunning()
         }
@@ -115,7 +115,7 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     
     // MARK: - AVCaptureVideoDataOutputSampleBufferDelegate
     
-    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+    public func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         delegate?.cameraManager(self, didCapture: sampleBuffer)
     }
 }

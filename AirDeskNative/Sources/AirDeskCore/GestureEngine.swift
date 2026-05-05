@@ -1,29 +1,52 @@
 import Foundation
 
-struct GestureState {
-    var cursorPx: NormalizedPoint?
-    var rawCursorPx: NormalizedPoint?
-    var pinchRatio: Double
-    var pinchActive: Bool
-    var pinchStarted: Bool
-    var pinchEnded: Bool
-    var trackingStable: Bool
+public struct GestureState: Sendable {
+    public var cursorPx: NormalizedPoint?
+    public var rawCursorPx: NormalizedPoint?
+    public var pinchRatio: Double
+    public var pinchActive: Bool
+    public var pinchStarted: Bool
+    public var pinchEnded: Bool
+    public var trackingStable: Bool
+
+    public init(
+        cursorPx: NormalizedPoint? = nil,
+        rawCursorPx: NormalizedPoint? = nil,
+        pinchRatio: Double = 0,
+        pinchActive: Bool = false,
+        pinchStarted: Bool = false,
+        pinchEnded: Bool = false,
+        trackingStable: Bool = false
+    ) {
+        self.cursorPx = cursorPx
+        self.rawCursorPx = rawCursorPx
+        self.pinchRatio = pinchRatio
+        self.pinchActive = pinchActive
+        self.pinchStarted = pinchStarted
+        self.pinchEnded = pinchEnded
+        self.trackingStable = trackingStable
+    }
 }
 
-class GestureEngine {
+public class GestureEngine {
     
     // Config: using ratio values relative to hand scale
-    var pinchOnThreshold: Double = 0.35
-    var pinchOffThreshold: Double = 0.45
-    var pinchDebounceMs: Double = 40.0
+    public var pinchOnThreshold: Double = 0.35
+    public var pinchOffThreshold: Double = 0.45
+    public var pinchDebounceMs: Double = 40.0
     
     private var cursorFilter = OneEuroFilter(minCutoff: 1.0, beta: 0.007, dCutoff: 1.0)
     
     private var previousPinchActive: Bool = false
     private var pendingPinchState: Bool = false
     private var pinchStateSince: TimeInterval? = nil
+    private let timeProvider: () -> TimeInterval
+
+    public init(timeProvider: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+        self.timeProvider = timeProvider
+    }
     
-    func update(handState: HandLandmarks?) -> GestureState {
+    public func update(handState: HandLandmarks?) -> GestureState {
         guard let hand = handState, let rawCursor = hand.indexTip else {
             cursorFilter.reset()
             previousPinchActive = false
@@ -70,7 +93,7 @@ class GestureEngine {
     }
     
     private func debouncePinch(rawPinch: Bool) -> Bool {
-        let now = ProcessInfo.processInfo.systemUptime
+        let now = timeProvider()
         
         if rawPinch == previousPinchActive {
             pendingPinchState = rawPinch
